@@ -84,8 +84,13 @@ camera_service = CameraService()
 
 def capture_single_frame(camera_index: int = 0, warmup_frames: int = 10):
     """Abre la cámara, descarta los primeros frames, captura uno solo, y la libera.
-    Para capturas puntuales (matriculación) que no requieren un stream continuo
-    como el que mantiene CameraService."""
+    Si el CameraService global ya está corriendo en el mismo índice, usa su
+    último frame para evitar conflictos de acceso al dispositivo."""
+    if camera_service._running and camera_service.camera_index == camera_index:
+        frame = camera_service.get_latest_frame()
+        if frame is not None:
+            return frame
+
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
         raise RuntimeError(f"No se pudo abrir la cámara (índice {camera_index})")
