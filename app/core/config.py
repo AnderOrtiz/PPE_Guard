@@ -17,13 +17,17 @@ class Settings(BaseSettings):
     MONGO_USERNAME: str
     MONGO_PASSWORD: str
 
-    # Un modelo por área — Opción B
     MODEL_PATHS: dict[str, str] = {
         "civil": "weights/civil.pt",
         "medicina": "weights/medicina.pt",
     }
     CONFIDENCE_THRESHOLD: float = 0.50
     IOU_THRESHOLD: float = 0.45
+
+    # Autenticación
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 480  # 8 horas, cubre una jornada de clases
 
 
 settings = Settings()

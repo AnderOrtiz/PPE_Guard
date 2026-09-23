@@ -1,204 +1,193 @@
-# PPE_Guard — Roadmap del backend
+# PPE_Guard — Roadmap del backend (rediseño: identificación facial + aulas)
 
-Todo lo que el backend necesita hacer, desde inicializar el proyecto hasta transmitir video y alertas en tiempo real al frontend. Ordenado por dependencia real: cada fase se apoya en la anterior.
+Rediseño completo tras el cambio de alcance: el sistema ahora identifica estudiantes por reconocimiento facial antes de revisar su indumentaria, dentro de aulas con roles (alumno, docente, coordinador) y autenticación real.
+
+Alcance: ~15 estudiantes (demo). Login simple (usuario/contraseña con hash, sin recuperación de contraseña). Sin múltiples cámaras. Backend siempre nativo (nunca vuelve a Docker), Docker solo para Mongo + Mongo Express.
 
 ---
 
 ## Fase 0 — Inicializar el proyecto
 
-La estructura de carpetas define dónde vive cada responsabilidad, antes de que el proyecto crezca lo suficiente para que moverla sea doloroso.
-
-- Repositorio Git con `.gitignore`
-- Entorno conda `yolo` con Python 3.11 y `requirements.txt` fijado con `pip freeze`
+- Repositorio Git, `.gitignore`, `.dockerignore`
+- Entorno conda `yolo`, Python 3.11, `requirements.txt` fijado con `pip freeze`
 - Estructura por capas: `core/`, `api/`, `services/`, `models/`, `websockets/`
-- `README.md` con los pasos para levantar el proyecto desde cero
-
-**Concepto clave:** la regla de dependencia — `api/` puede importar de `services/`, y `services/` de `core/`, pero nunca al revés.
 
 ---
 
 ## Fase 1 — Configuración centralizada con Pydantic
 
-Ninguna credencial, ruta ni umbral debería estar escrito dentro del código.
-
-- `core/config.py` con una clase `Settings` (`BaseSettings`)
-- `.env` real (ignorado por Git) y `.env.template` versionado
-- Variables de app, de Mongo, de CORS, y las rutas de los dos modelos de YOLO (`MODEL_PATHS` por área)
-
-**Concepto clave:** Pydantic valida y convierte de tipo — un error en el `.env` falla al arrancar con un mensaje claro, no a mitad de una operación.
+- `core/config.py` con `Settings` (`BaseSettings`)
+- `.env` real + `.env.template` versionado
+- Variables de app, Mongo, CORS, rutas de los modelos YOLO por área, y ahora también: secreto para firmar JWT, tiempo de expiración del token, umbral de similitud para reconocimiento facial
 
 ---
 
 ## Fase 2 — Infraestructura de base de datos con Docker
 
-Docker solo orquesta lo que no necesita hardware local: MongoDB y Mongo Express. El backend corre siempre nativo (nunca se vuelve a dockerizar), porque necesita acceso directo a la cámara de la máquina y este proyecto no tiene fase de despliegue.
-
-- `compose.yaml` con Mongo (autenticación activada) y Mongo Express
+- `compose.yaml`: Mongo (autenticación activada) + Mongo Express
 - Persistencia por bind mount
-- Credenciales y puertos leídos desde el `.env`
-
-**Ojo con esto:** dentro de la red de Docker, los servicios se llaman por su nombre (`db`). El backend, corriendo fuera de Docker, debe conectarse por `localhost`.
+- El backend nunca corre dentro de Docker — necesita acceso directo a la cámara
 
 ---
 
 ## Fase 3 — Conexión a MongoDB
 
-Una sola conexión compartida, abierta al arrancar y cerrada al apagar.
-
-- Cliente `AsyncMongoClient` creado en el `lifespan` de FastAPI
-- Un `ping` al arrancar para fallar de inmediato si Mongo no responde
-- Función `get_database()` expuesta al resto del proyecto
-- Índices sobre `sessions.inicio`, `violations.session_id` y `violations.inicio`
+- Cliente `AsyncMongoClient` en el `lifespan` de FastAPI, con `ping` al arrancar
+- `get_database()` expuesto al resto del proyecto
+- Índices sobre las colecciones nuevas (ver fase 5)
 
 ---
 
-## Fase 4 — Modelar los documentos y los esquemas
+## Fase 4 — Autenticación: usuarios y roles
 
-Define qué se guarda antes de escribir endpoints.
+Sin esto, no se pueden aplicar los permisos por rol que exige el proyecto (coordinador ve todo, docente controla el aula, alumno solo ve lo suyo).
+
+- Colección `usuarios`: `username`, `password_hash`, `rol` (`alumno` | `docente` | `coordinador`), `nombre`
+- Hash de contraseña con `bcrypt` — nunca se guarda en texto plano
+- Endpoint `POST /auth/login` — verifica credenciales, emite un JWT con el `rol` embebido
+- Dependencia de FastAPI para proteger endpoints, extrayendo el usuario y rol desde el token
+- Middleware/dependencia de autorización por rol (ej. `require_role("coordinador")`)
+
+**Concepto clave:** el JWT es firmado por el backend con una clave secreta — el frontend no puede alterar el rol dentro del token sin invalidar la firma, así que la autorización es confiable aunque el token viva en el navegador.
+
+---
+
+## Fase 5 — Modelar aulas, estudiantes y asistencias
 
 **Colecciones:**
-- `practices` — catálogo de áreas y su PPE obligatorio (civil: casco, chaleco · medicina: mascarilla, guantes, gorro)
-- `sessions` — cada práctica: área, docente a cargo, carrera, inicio, fin, estado
-- `violations` — un documento por episodio de incumplimiento: `track_id`, sesión, faltantes, inicio, fin, estado, ruta de evidencia
+- `aulas` — nombre, área (`civil` | `medicina`, fija al crearse), `docente_id`, lista de `estudiantes_ids` matriculados
+- `estudiantes` — `codigo` único, `nombre`, `face_embedding` (vector numérico, no imagen)
+- `asistencias` — un documento por revisión: `aula_id`, `estudiante_id`, `fecha`, `hora_identificacion`, `cumplio_indumentaria`, `faltantes`, `evidencia_url`
 
 **Qué construir:**
-- Esquemas Pydantic separando entrada, salida, y el documento de Mongo
-- Manejo de `ObjectId` como string serializable
+- Esquemas Pydantic separando entrada/salida/documento de Mongo
+- Índices sobre `asistencias.aula_id`, `asistencias.estudiante_id`, `asistencias.fecha`
 
 ---
 
-## Fase 5 — API REST base y documentación
+## Fase 6 — Matriculación de estudiantes con reconocimiento facial
 
-- Router principal con prefijo `/api/v1`, routers por recurso en `endpoints/`
-- CORS habilitado para el origen del frontend en desarrollo (Vite, `localhost:5173`)
-- Endpoint de salud que verifica también que Mongo responde
-- Endpoint `GET /practices`
+No se suben fotos — el sistema captura el rostro en vivo y calcula su representación matemática.
 
----
+- Instalar `deepface` (evita la complejidad de compilar `dlib` que tiene `face_recognition`)
+- Endpoint/flujo de matriculación: abre la cámara, captura un frame, `DeepFace.represent(frame)` calcula el embedding
+- Se guarda el embedding en `estudiantes.face_embedding`, junto con nombre y código
+- Validación básica: verificar que se detectó exactamente un rostro antes de guardar
 
-## Fase 6 — Servicio de YOLO: un modelo por área
-
-El área se conoce antes de encender la cámara (se elige al crear la sesión), así que se puede cargar el modelo correcto sin correr dos modelos a la vez.
-
-- `get_model(area)` que carga y cachea en memoria cada modelo la primera vez que se pide
-- Inferencia de calentamiento justo después de cargar cada modelo
-- Función de inferencia que devuelve clase, confianza, coordenadas y `track_id`
-- Dependencia externa necesaria: `lapx` (requerida por el tracking de Ultralytics, no viene por defecto)
-
-
-**Ojo con esto:** la inferencia es bloqueante y pesada en CPU — nunca se llama directo dentro de una función `async` sin sacarla a un hilo o executor.
+**Concepto clave:** un embedding es un vector de números que representa el rostro — comparar dos rostros se reduce a medir qué tan cerca están sus vectores (distancia coseno), no a comparar imágenes directamente.
 
 ---
 
-## Fase 7 — Captura de video con OpenCV
+## Fase 7 — Servicio de identificación facial
 
-Una API web responde a peticiones puntuales; una cámara produce datos continuamente. Son dos modelos de ejecución distintos conviviendo en el mismo proceso.
+- Función que recibe un frame, calcula su embedding, y lo compara contra todos los embeddings guardados de los estudiantes matriculados en esa aula
+- Si la mejor coincidencia supera el umbral de similitud configurado → estudiante identificado
+- Si no hay ninguna coincidencia suficientemente buena → "no identificado", se sigue intentando
 
-- Apertura de la cámara con `VideoCapture(0)`, con verificación de que abrió
-- Warm-up: descartar los primeros frames mientras la cámara ajusta exposición
-- Bucle de lectura en un hilo separado, con tasa controlada (5-10 FPS, no los 30 nativos)
-- Redimensionado del frame antes de la inferencia
-- Solo se guarda el "último frame" — nunca se acumula una cola de frames viejos
+**Pendiente:** el umbral exacto de similitud se ajusta con pruebas reales — muy bajo genera falsos positivos (identifica al estudiante equivocado), muy alto rechaza identificaciones válidas por mala luz o ángulo.
 
----
-
-## Fase 8 — Seguimiento de personas con ByteTrack
-
-Sin seguimiento, la misma persona incumpliendo se contaría como un incumplimiento nuevo en cada frame.
-
-- Cambiar de `model.predict()` a `model.track(frame, persist=True, tracker="bytetrack.yaml")`
-- `persist=True` mantiene la continuidad del `track_id` entre frames dentro del mismo bucle
-
-**Concepto clave:** un `track_id` no es una identidad real, es una hipótesis del rastreador. Si la persona sale del cuadro o queda tapada, puede reaparecer con un `track_id` nuevo — eso se compensa en la fase 10, no aquí.
+**Nota de escala:** con ~15 estudiantes matriculados, comparar contra todos los embeddings en cada intento es prácticamente instantáneo en CPU — no hace falta ninguna optimización de búsqueda.
 
 ---
 
-## Fase 9 — Orquestar el pipeline de detección
+## Fase 8 — Servicio de YOLO por área
 
-Captura, tracking, evaluación y transmisión se convierten en un ciclo continuo mientras haya una sesión activa.
+(Reutilizado del diseño anterior, sin cambios de fondo.)
 
-- Un hilo propio (`detection_orchestrator`) que corre a un intervalo fijo (~0.3s), separado del hilo de captura de la cámara
-- Arranque y parada ligados a la creación/finalización de la sesión
+- `get_model(area)` carga y cachea cada modelo la primera vez que se pide
+- Inferencia de calentamiento al cargar
+- Dependencia externa: `lapx` (requerida por el tracking de Ultralytics)
 
-**Concepto clave:** patrón productor–consumidor — la cámara produce a su ritmo, el modelo consume al suyo, y no se acumula rezago porque cada ciclo trabaja con el frame más reciente disponible.
-
----
-
-## Fase 10 — Reglas de cumplimiento y máquina de estados
-
-El corazón del sistema: convierte "detecté esto" en "esta persona lleva rato incumpliendo, hay que registrarlo".
-
-- **Asociación geométrica:** una falta (`NO-Hardhat`, etc.) se atribuye a una persona si el centro de su caja cae dentro de la caja de esa `Person`
-- **Filtro de confianza mínima para personas**, más estricto que el umbral general del modelo, para evitar que ruido de fondo abra episodios falsos
-- **Distinción entre "sin señal" y "cumple":** un frame donde el modelo simplemente no detectó nada relevante no debe resetear el progreso hacia confirmar ni hacia cerrar
-- **Máquina de estados por `track_id`:** `cumple` → `posible` (sostenido N frames) → `confirmado` (se abre el episodio) → `cumple` de nuevo (sostenido M frames cumpliendo, o timeout del track)
-- El conjunto de faltas (`missing`) se sigue actualizando mientras el episodio está `confirmado` — si la persona corrige una parte, se refleja sin cerrar y reabrir
-- **Heurística anti-duplicado:** una lista de "episodios recién cerrados" (ventana de ~40s); si reaparece la misma combinación exacta de faltas cerca de donde se vio, se reabre ese episodio en vez de crear uno nuevo
-
-**Pendiente:** los valores exactos de N y M frames se ajustan con el pipeline corriendo de punta a punta, no antes.
+**Pendiente:** el modelo de medicina (mascarilla, guantes, gorro) sigue sin entrenarse — se puede seguir avanzando con civil mientras tanto.
 
 ---
 
-## Fase 11 — WebSockets en tiempo real
+## Fase 9 — Captura de video con OpenCV
 
-El frontend no pregunta si hay novedades — el backend empuja los datos apenas ocurren.
+(Reutilizado sin cambios.)
 
-- `ConnectionManager` con soporte para múltiples clientes conectados
-- Endpoint `/ws/detections`
-- Puente seguro entre el hilo del orquestador (síncrono) y el event loop de FastAPI (asíncrono), vía `asyncio.run_coroutine_threadsafe`
-
-**Tres tipos de mensaje:**
-- `detecciones_frame` — se emite en cada ciclo del orquestador; coordenadas normalizadas (0-1) y `is_violation` ya calculado, para alimentar cajas dibujadas en vivo en el frontend
-- `incumplimiento_iniciado` — al confirmarse un episodio: `episode_id`, `track_id`, `faltantes`, `evidencia_url`
-- `incumplimiento_resuelto` — al cerrarse un episodio: solo `episode_id`
+- `VideoCapture(0)` con verificación de apertura y warm-up de los primeros frames
+- Bucle de lectura en hilo separado, tasa controlada (5-10 FPS)
+- Solo se conserva el último frame, nunca una cola acumulada
 
 ---
 
-## Fase 12 — Streaming de video en vivo
+## Fase 10 — Seguimiento de personas con ByteTrack
 
-El frontend necesita ver la cámara en vivo, no solo las cajas y alertas.
+(Reutilizado sin cambios.)
 
-- Endpoint `GET /api/v1/stream` que sirve el último frame de `camera_service` como MJPEG (`multipart/x-mixed-replace`)
-- Se consume directo desde un `<img>` en el frontend, sin JavaScript adicional
-
-**Límite aceptado:** el video (MJPEG) y las cajas (WebSocket) son dos canales independientes sin frame ID compartido — quedan cerca en el tiempo, pero no perfectamente sincronizados. Suficiente para este proyecto.
+- `model.track(frame, persist=True, tracker="bytetrack.yaml")` en vez de `predict()`
+- El `track_id` sigue sin ser una identidad real por sí solo — ahora se vuelve identidad real recién en la fase 11, al vincularlo con el estudiante ya identificado
 
 ---
 
-## Fase 13 — Persistir episodios con evidencia
+## Fase 11 — Orquestar el flujo de dos fases: identificación → confirmación → indumentaria
 
-Un episodio, no un frame — y ese episodio necesita una imagen que respalde que el incumplimiento fue real.
+Esta es la pieza central del rediseño. Reemplaza al orquestador anterior (que solo corría un modo continuo) por una máquina de dos fases explícitas.
 
-- Al confirmarse el episodio: dibujar sobre una copia del frame completo un rectángulo y el texto de lo que falta
-- Guardar esa imagen en disco; en Mongo solo se guarda la ruta
-- Servir esa carpeta de evidencia como estática, para que `evidencia_url` del WebSocket apunte a un archivo real
-- Capa de repositorio en `services/` para las operaciones de Mongo sobre `violations`
-- Actualizar el mismo documento al cerrarse el episodio (hora de fin, estado)
+- **Modo identificación:** corre el servicio de la fase 7 contra el frame en vivo. Al identificar a un estudiante, se transmite por WebSocket y se espera confirmación — no pasa automáticamente a revisar indumentaria
+- **Confirmación (botón del frontend):** un endpoint o mensaje de WebSocket dispara el cambio de fase, ya con el `estudiante_id` fijado
+- **Modo indumentaria:** se activa el pipeline ya existente (YOLO + tracking + `compliance_engine`), pero ahora los resultados se asocian al estudiante identificado, no a un `track_id` anónimo suelto
+- Al cerrarse la revisión (episodio de cumplimiento resuelto, o tiempo razonable), se guarda la `asistencia` y el orquestador vuelve a modo identificación para el siguiente estudiante
 
-**Nota:** no hace falta limpieza periódica de evidencia — proyecto de presentación única, no de uso continuo.
-
----
-
-## Fase 14 — Historial y reportes
-
-- Endpoints de consulta con filtros por fecha y por práctica/área
-- Agrupación por día, ordenado por hora
-- Paginación desde el inicio
-- Agregaciones de Mongo para conteos (por área, por tipo de falta, por día)
+**Concepto clave:** el botón de confirmación existe porque una transición automática por tiempo fallaría en casos reales (mala luz, el estudiante se mueve) — dar control explícito al proceso es más robusto y más fácil de depurar en una demo en vivo.
 
 ---
 
-## Fase 15 — Dashboard de sesiones y prácticas
+## Fase 12 — Reglas de cumplimiento y máquina de estados
 
-Convierte el área en una elección del docente, no en una constante escondida en el código.
+(Reutilizado del diseño anterior — asociación geométrica de PPE a personas, máquina de estados por `track_id`, heurística anti-duplicado — ahora operando dentro del modo indumentaria de la fase 11, con el resultado final vinculado al estudiante ya identificado en vez de quedar anónimo.)
 
-- CRUD de `practices`: cada área con su PPE obligatorio
-- `POST /sessions` — crear una práctica con área, docente y carrera; dispara el encendido de la cámara y el pipeline con el modelo y las reglas correctas
-- `GET /sessions/active` — consultar si hay una sesión en curso
-- `POST /sessions/{id}/end` — botón "Finalizar práctica": apaga la cámara, detiene el orquestador, cierra por la fuerza los episodios que hayan quedado abiertos, marca la sesión como terminada
+**Pendiente:** los umbrales de frames para confirmar/cerrar siguen ajustándose con pruebas.
+
+---
+
+## Fase 13 — WebSockets en tiempo real
+
+Los tres tipos de mensaje existentes (`detecciones_frame`, `incumplimiento_iniciado`/`_actualizado`/`_resuelto`) se mantienen para el modo indumentaria. Se agregan dos nuevos para el modo identificación:
+
+- `estudiante_identificado` — `{ "estudiante_id", "nombre", "confianza" }`, cuando el sistema encuentra una coincidencia
+- `fase_cambiada` — `{ "fase": "identificacion" | "indumentaria" }`, cuando se confirma el cambio de fase
+
+---
+
+## Fase 14 — Streaming de video en vivo
+
+(Reutilizado sin cambios — `GET /api/v1/stream`, MJPEG servido desde `camera_service`.)
+
+---
+
+## Fase 15 — Persistir asistencias con evidencia
+
+Reemplaza a la antigua persistencia de `violations` sueltas.
+
+- Al cerrarse la revisión de un estudiante: dibujar la evidencia (frame + rectángulo + texto de lo que falta) igual que antes
+- Insertar el documento en `asistencias`, vinculado a `estudiante_id` y `aula_id`, con `cumplio_indumentaria`, `faltantes`, `evidencia_url`
+- Servir la carpeta de evidencia como estática
+
+---
+
+## Fase 16 — Historial y reportes por rol
+
+- `GET /asistencias` con filtros por fecha, aula, estudiante
+- **Coordinador:** puede consultar todas las asistencias de todas las aulas
+- **Alumno:** el endpoint filtra automáticamente por su propio `estudiante_id` — no puede pedir las de otro
+- **Docente:** puede consultar las asistencias de las aulas que tiene asignadas
+- Agrupación por día, paginación, agregaciones de Mongo para conteos
+
+**Concepto clave:** el filtro por rol se aplica del lado del backend a partir del usuario autenticado en el token — nunca confiando en un parámetro que mande el frontend.
+
+---
+
+## Fase 17 — Dashboard de aulas y control del programa
+
+- CRUD de `aulas`: nombre, área (fija al crear), docente asignado, estudiantes matriculados
+- El docente inicia el programa de su aula → arranca el orquestador de la fase 11 en modo identificación
+- Botón de confirmación (fase 11) y botón de "Finalizar programa" — apaga cámara, detiene orquestador, cierra cualquier revisión que haya quedado abierta
 
 ---
 
 ## Notas de cierre
 
-- El modelo de medicina y los umbrales N/M de la máquina de estados son las únicas piezas que no bloquean el avance del resto — se pueden resolver en paralelo, sobre la marcha.
+- Piezas que no bloquean el resto del desarrollo, resolubles en paralelo: el modelo de medicina, los umbrales de frames de la máquina de estados, y el umbral de similitud facial.
+- Fuera de alcance a propósito: recuperación de contraseña, verificación de correo, múltiples cámaras, y una fase formal de robustez/logging/pruebas — proyecto de demostración con ~15 estudiantes, no un sistema en producción.

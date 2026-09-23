@@ -80,3 +80,22 @@ class CameraService:
 
 
 camera_service = CameraService()
+
+
+def capture_single_frame(camera_index: int = 0, warmup_frames: int = 10):
+    """Abre la cámara, descarta los primeros frames, captura uno solo, y la libera.
+    Para capturas puntuales (matriculación) que no requieren un stream continuo
+    como el que mantiene CameraService."""
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        raise RuntimeError(f"No se pudo abrir la cámara (índice {camera_index})")
+
+    try:
+        for _ in range(warmup_frames):
+            cap.read()
+        ret, frame = cap.read()
+        if not ret:
+            raise RuntimeError("No se pudo capturar un frame de la cámara")
+        return frame
+    finally:
+        cap.release()
