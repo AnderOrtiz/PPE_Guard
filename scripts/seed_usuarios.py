@@ -34,7 +34,7 @@ async def seed():
             "nombre": "Docente Demo",
         },
         # {
-        #     "username": "ander-ortiz",
+        #     "username": "ander",
         #     "password_hash": hash_password("2212"),
         #     "rol": "alumno",
         #     "nombre": "Docente Demo",

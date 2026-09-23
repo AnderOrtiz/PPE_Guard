@@ -16,4 +16,4 @@ if not ret:
 detecciones = detect(frame, area="civil")
 print(detecciones)
 
-#python -m scripts.test_camara_yolo_service
+# python -m scripts.test_camara_yolo_service
