@@ -1,0 +1,43 @@
+# Entorno / secretos
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+
+# Datos de Mongo (si usas bind mount en algún entorno)
+.data/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Modelos entrenados (pesos pueden pesar mucho — súbelos con Git LFS o por separado si aplica)
+*.pt
+*.onnx
+
+# Frontend (si el repo incluye React más adelante)
+node_modules/
+dist/
+build/
+
+static/evidence/
