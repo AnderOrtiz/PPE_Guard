@@ -20,35 +20,33 @@ async def seed():
         await client.close()
         return
 
+    coordinador = await db["usuarios"].insert_one({
+        "codigo": "COORD001",
+        "password_hash": hash_password("cambiar123"),
+        "rol": "coordinador",
+        "nombre": "Coordinador Demo",
+    })
+
     await db["usuarios"].insert_many([
         {
-            "username": "coordinador1",
+            "codigo": "ADMIN001",
             "password_hash": hash_password("cambiar123"),
-            "rol": "coordinador",
-            "nombre": "Coordinador Demo",
+            "rol": "admin",
+            "nombre": "Admin Demo",
         },
         {
-            "username": "docente1",
+            "codigo": "DOC001",
             "password_hash": hash_password("cambiar123"),
             "rol": "docente",
             "nombre": "Docente Demo",
+            "facultad": "Ingeniería",
+            "coordinador_id": str(coordinador.inserted_id),
         },
-        # {
-        #     "username": "ander",
-        #     "password_hash": hash_password("2212"),
-        #     "rol": "alumno",
-        #     "nombre": "Docente Demo",
-        # },
     ])
 
-    print("Usuarios de prueba insertados.")
+    print("Usuarios de prueba insertados: ADMIN001, COORD001, DOC001 (contraseña: cambiar123)")
     await client.close()
 
 
 if __name__ == "__main__":
     asyncio.run(seed())
-
-
-# python -m scripts.seed_usuarios
-
-# POST /api/v1/auth/login
