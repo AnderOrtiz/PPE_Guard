@@ -105,3 +105,14 @@ Para cada práctica ejecutada, el sistema desplegará la información organizada
 4. **Persistencia de Prácticas:** Cada práctica iniciada por un docente se almacena históricamente dentro de la materia a la que pertenece.
 
 ---
+
+está bien fusiona usuarios y estudiantes en una sola colección y manten un el campo  de área (civil/medicina) en la materia.
+
+con respecto a:
+"El docente y la facultad se asignan automáticamente según el contexto de la materia donde el coordinador o docente esté matriculando al alumno."
+si un alumno tiene un perfíl único global y  puede tener varios docentes, pero no estar en varias carreras ni en varias facultades,
+un alumno tiene una carrera y una facultad, si tienene varios docentes
+
+un docente solo puede tener una facultad, pero puede inpartir varias materias, y un coordinador puede tener varios docentes en su cargo 
+
+dame una propuesta para que estas relaciones:

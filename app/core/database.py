@@ -26,7 +26,7 @@ async def connect_to_mongo():
     await database["asistencias"].create_index("aula_id")
     await database["asistencias"].create_index("estudiante_id")
     await database["asistencias"].create_index("fecha")
-    await database["estudiantes"].create_index("codigo", unique=True)
+    await database["usuarios"].create_index("codigo", unique=True)
 
 
 async def close_mongo_connection():

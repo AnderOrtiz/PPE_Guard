@@ -17,19 +17,20 @@ async def main():
         return
 
     database = get_database()
-    estudiantes = [doc async for doc in database["estudiantes"].find()]
+    estudiantes = [doc async for doc in database["usuarios"].find({"rol": "alumno"})]
 
     match = find_best_match(embedding, estudiantes)
 
     if match is None:
         print("No se encontró ninguna coincidencia suficientemente confiable.")
     else:
-        print(f"Identificado: {match['nombre']} (código {match['codigo']}) — similitud: {match['similarity']:.3f}")
+        print(
+            f"Identificado: {match['nombre']} (código {match['codigo']}) — similitud: {match['similarity']:.3f}")
 
     await close_mongo_connection()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+
     # python -m scripts.test_identification

@@ -5,19 +5,25 @@ from app.core.security import decode_access_token
 
 bearer_scheme = HTTPBearer()
 
+# Jerarquía: el admin hereda todos los permisos del coordinador
+ROLE_EXPANSION = {"admin": {"admin", "coordinador"}}
+
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
-    token = credentials.credentials
     try:
-        payload = decode_access_token(token)
+        payload = decode_access_token(credentials.credentials)
+        return {"codigo": payload["sub"], "user_id": payload["uid"], "rol": payload["rol"]}
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
-    return {"username": payload["sub"], "rol": payload["rol"]}
 
 
 def require_role(*roles: str):
+    allowed = set(roles)
+
     def dependency(user: dict = Depends(get_current_user)) -> dict:
-        if user["rol"] not in roles:
+        effective_roles = ROLE_EXPANSION.get(user["rol"], {user["rol"]})
+        if not (effective_roles & allowed):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permiso para esta acción")
         return user
+
     return dependency
