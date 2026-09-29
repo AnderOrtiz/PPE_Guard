@@ -5,10 +5,9 @@ from app.models.common import PyObjectId
 
 class AsistenciaInDB(BaseModel):
     id: PyObjectId = Field(alias="_id")
-    aula_id: str
-    estudiante_id: str
-    fecha: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    hora_identificacion: datetime
+    practica_id: str
+    alumno_id: str
+    hora_identificacion: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     cumplio_indumentaria: bool
     faltantes: list[str] = []
     evidencia_url: str | None = None

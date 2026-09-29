@@ -16,17 +16,15 @@ async def connect_to_mongo():
         username=settings.MONGO_USERNAME,
         password=settings.MONGO_PASSWORD,
     )
-    # Fuerza una conexión real para detectar errores al arrancar, no en el primer request
     await db.client.admin.command("ping")
 
     database = db.client[settings.MONGO_DB_NAME]
-    await database["sessions"].create_index("inicio")
-    await database["violations"].create_index("session_id")
-    await database["violations"].create_index("inicio")
-    await database["asistencias"].create_index("aula_id")
-    await database["asistencias"].create_index("estudiante_id")
-    await database["asistencias"].create_index("fecha")
     await database["usuarios"].create_index("codigo", unique=True)
+    await database["materias"].create_index("docente_id")
+    await database["materias"].create_index("coordinador_id")
+    await database["practicas"].create_index("materia_id")
+    await database["asistencias"].create_index("practica_id")
+    await database["asistencias"].create_index("alumno_id")
 
 
 async def close_mongo_connection():
