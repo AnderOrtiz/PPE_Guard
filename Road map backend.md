@@ -1,8 +1,8 @@
-# PPE_Guard — Roadmap del backend (rediseño: identificación facial + aulas)
+# PPE_Guard — Roadmap del backend (v4: sin requerimientos duplicados, admin = superusuario)
 
-Rediseño completo tras el cambio de alcance: el sistema ahora identifica estudiantes por reconocimiento facial antes de revisar su indumentaria, dentro de aulas con roles (alumno, docente, coordinador) y autenticación real.
+Ajustes sobre el rediseño anterior (materias/prácticas/roles): el PPE exigido ya no se guarda por materia — se consulta desde `practices` según el área, porque solo existen dos modelos fijos y duplicar esa lista por materia no aporta nada. El admin ahora hereda también los permisos de docente, además de los de coordinador.
 
-Alcance: ~15 estudiantes (demo). Login simple (usuario/contraseña con hash, sin recuperación de contraseña). Sin múltiples cámaras. Backend siempre nativo (nunca vuelve a Docker), Docker solo para Mongo + Mongo Express.
+Alcance: ~15 estudiantes (demo). Login simple con JWT, identificado por `codigo`. Sin recuperación de contraseña. Backend siempre nativo, Docker solo para Mongo + Mongo Express.
 
 ---
 
@@ -38,156 +38,127 @@ Alcance: ~15 estudiantes (demo). Login simple (usuario/contraseña con hash, sin
 
 ---
 
-## Fase 4 — Autenticación: usuarios y roles
+## Fase 4 — Autenticación: usuarios unificados y roles jerárquicos
 
-Sin esto, no se pueden aplicar los permisos por rol que exige el proyecto (coordinador ve todo, docente controla el aula, alumno solo ve lo suyo).
+**Colección `usuarios` (unificada, login por `codigo` en vez de `username`):**
+- Comunes: `codigo`, `password_hash`, `rol` (`alumno` | `docente` | `coordinador` | `admin`), `nombre`
+- `rol == "alumno"`: `carrera`, `facultad`, `face_embedding`
+- `rol == "docente"`: `facultad`, `coordinador_id`
+- `coordinador` / `admin`: sin campos adicionales
 
-- Colección `usuarios`: `username`, `password_hash`, `rol` (`alumno` | `docente` | `coordinador`), `nombre`
-- Hash de contraseña con `bcrypt` — nunca se guarda en texto plano
-- Endpoint `POST /auth/login` — verifica credenciales, emite un JWT con el `rol` embebido
-- Dependencia de FastAPI para proteger endpoints, extrayendo el usuario y rol desde el token
-- Middleware/dependencia de autorización por rol (ej. `require_role("coordinador")`)
+**Jerarquía de permisos:**
+- `admin` hereda TODO lo de `coordinador` **y** TODO lo de `docente` (puede iniciar prácticas, además de crear materias/docentes/coordinadores)
+- Ningún rol hereda hacia arriba — un docente sigue sin poder crear materias aunque el admin sí pueda hacer lo que hace un docente
 
-**Concepto clave:** el JWT es firmado por el backend con una clave secreta — el frontend no puede alterar el rol dentro del token sin invalidar la firma, así que la autorización es confiable aunque el token viva en el navegador.
+**Endpoints:**
+- `POST /auth/login` — recibe `codigo` + `password`, devuelve JWT con `uid` (id del usuario), `sub` (código), `rol`
+- `POST /usuarios/coordinadores` — solo `admin`
+- `POST /usuarios/docentes` — `coordinador` o `admin`
+- `POST /usuarios/alumnos` — `coordinador`, `docente` o `admin` (incluye captura facial, fase 6)
 
----
-
-## Fase 5 — Modelar aulas, estudiantes y asistencias
-
-**Colecciones:**
-- `aulas` — nombre, área (`civil` | `medicina`, fija al crearse), `docente_id`, lista de `estudiantes_ids` matriculados
-- `estudiantes` — `codigo` único, `nombre`, `face_embedding` (vector numérico, no imagen)
-- `asistencias` — un documento por revisión: `aula_id`, `estudiante_id`, `fecha`, `hora_identificacion`, `cumplio_indumentaria`, `faltantes`, `evidencia_url`
-
-**Qué construir:**
-- Esquemas Pydantic separando entrada/salida/documento de Mongo
-- Índices sobre `asistencias.aula_id`, `asistencias.estudiante_id`, `asistencias.fecha`
+**Concepto clave:** ninguna relación "hacia arriba" (alumno→docente, docente→materias) se guarda como campo fijo — sale de qué documentos referencian el `_id` de quién. La única excepción es `docente.coordinador_id`, porque esa sí es una relación fija de uno a uno.
 
 ---
 
-## Fase 6 — Matriculación de estudiantes con reconocimiento facial
+## Fase 5 — Modelar materias, prácticas y asistencias
 
-No se suben fotos — el sistema captura el rostro en vivo y calcula su representación matemática.
+**Colección `materias`:**
+- `nombre`, `area` (`civil` | `medicina`, fija), `carrera`, `facultad`, `aula` (texto libre — ubicación física, ej. "Laboratorio de Física")
+- `docente_id`, `coordinador_id` (autocompletado desde `docente.coordinador_id`)
+- `alumnos_ids: list[str]`
+- **Sin campo de PPE requerido** — se consulta desde `practices` por `area` en el momento en que se necesita (fase 11, fase 16), no se duplica aquí
 
-- Instalar `deepface` (evita la complejidad de compilar `dlib` que tiene `face_recognition`)
-- Endpoint/flujo de matriculación: abre la cámara, captura un frame, `DeepFace.represent(frame)` calcula el embedding
-- Se guarda el embedding en `estudiantes.face_embedding`, junto con nombre y código
-- Validación básica: verificar que se detectó exactamente un rostro antes de guardar
+**Colección `practicas`:**
+- `materia_id`, `docente_id`, `fecha`, `hora_inicio`, `hora_fin`, `estado` (`activa` | `finalizada`)
 
-**Concepto clave:** un embedding es un vector de números que representa el rostro — comparar dos rostros se reduce a medir qué tan cerca están sus vectores (distancia coseno), no a comparar imágenes directamente.
+**Colección `asistencias`:**
+- `practica_id`, `alumno_id`, `hora_identificacion`, `cumplio_indumentaria`, `faltantes`, `evidencia_url`
+
+**Endpoints:**
+- `POST /materias` — solo `coordinador` (el admin, si necesita crear una, lo hace por su expansión de permisos aunque conceptualmente esta acción siga siendo "de coordinador")
+- `GET /materias?docente_id=...` — filtra automáticamente por el `coordinador_id`/`docente_id` del usuario autenticado; el parámetro opcional permite a un coordinador o admin acotar a un docente específico, sin poder ver materias ajenas a su alcance
+
+**Índices:** `usuarios.codigo` (único), `materias.docente_id`, `materias.coordinador_id`, `practicas.materia_id`, `asistencias.practica_id`, `asistencias.alumno_id`
+
+---
+
+## Fase 6 — Matriculación facial de alumnos
+*(Ya construida y probada — DeepFace + Facenet, captura en vivo, sin subir fotos. Permitida para coordinador, docente y admin.)*
 
 ---
 
 ## Fase 7 — Servicio de identificación facial
+*(Ya construido y probado — similitud coseno, umbral 0.60 validado contra la tabla oficial de DeepFace.)*
 
-- Función que recibe un frame, calcula su embedding, y lo compara contra todos los embeddings guardados de los estudiantes matriculados en esa aula
-- Si la mejor coincidencia supera el umbral de similitud configurado → estudiante identificado
-- Si no hay ninguna coincidencia suficientemente buena → "no identificado", se sigue intentando
-
-**Pendiente:** el umbral exacto de similitud se ajusta con pruebas reales — muy bajo genera falsos positivos (identifica al estudiante equivocado), muy alto rechaza identificaciones válidas por mala luz o ángulo.
-
-**Nota de escala:** con ~15 estudiantes matriculados, comparar contra todos los embeddings en cada intento es prácticamente instantáneo en CPU — no hace falta ninguna optimización de búsqueda.
+**Pendiente:** filtrar los candidatos a los `alumnos_ids` de la materia de la práctica activa, en vez de comparar contra todos los alumnos del sistema.
 
 ---
 
 ## Fase 8 — Servicio de YOLO por área
+*(Sin cambios — un modelo por área, cacheado en memoria.)*
 
-(Reutilizado del diseño anterior, sin cambios de fondo.)
-
-- `get_model(area)` carga y cachea cada modelo la primera vez que se pide
-- Inferencia de calentamiento al cargar
-- Dependencia externa: `lapx` (requerida por el tracking de Ultralytics)
-
-**Pendiente:** el modelo de medicina (mascarilla, guantes, gorro) sigue sin entrenarse — se puede seguir avanzando con civil mientras tanto.
+**Nota de esta fase, reforzada por la simplificación de hoy:** el PPE que evalúa `compliance_engine` para una práctica se obtiene consultando `practices` por el `area` de la materia — nunca hay que sincronizar nada adicional entre modelo y materia, porque la fuente de verdad es una sola.
 
 ---
 
 ## Fase 9 — Captura de video con OpenCV
-
-(Reutilizado sin cambios.)
-
-- `VideoCapture(0)` con verificación de apertura y warm-up de los primeros frames
-- Bucle de lectura en hilo separado, tasa controlada (5-10 FPS)
-- Solo se conserva el último frame, nunca una cola acumulada
+*(Sin cambios.)*
 
 ---
 
 ## Fase 10 — Seguimiento de personas con ByteTrack
-
-(Reutilizado sin cambios.)
-
-- `model.track(frame, persist=True, tracker="bytetrack.yaml")` en vez de `predict()`
-- El `track_id` sigue sin ser una identidad real por sí solo — ahora se vuelve identidad real recién en la fase 11, al vincularlo con el estudiante ya identificado
+*(Sin cambios.)*
 
 ---
 
-## Fase 11 — Orquestar el flujo de dos fases: identificación → confirmación → indumentaria
+## Fase 11 — Orquestar el flujo de dos fases dentro de una práctica
 
-Esta es la pieza central del rediseño. Reemplaza al orquestador anterior (que solo corría un modo continuo) por una máquina de dos fases explícitas.
-
-- **Modo identificación:** corre el servicio de la fase 7 contra el frame en vivo. Al identificar a un estudiante, se transmite por WebSocket y se espera confirmación — no pasa automáticamente a revisar indumentaria
-- **Confirmación (botón del frontend):** un endpoint o mensaje de WebSocket dispara el cambio de fase, ya con el `estudiante_id` fijado
-- **Modo indumentaria:** se activa el pipeline ya existente (YOLO + tracking + `compliance_engine`), pero ahora los resultados se asocian al estudiante identificado, no a un `track_id` anónimo suelto
-- Al cerrarse la revisión (episodio de cumplimiento resuelto, o tiempo razonable), se guarda la `asistencia` y el orquestador vuelve a modo identificación para el siguiente estudiante
-
-**Concepto clave:** el botón de confirmación existe porque una transición automática por tiempo fallaría en casos reales (mala luz, el estudiante se mueve) — dar control explícito al proceso es más robusto y más fácil de depurar en una demo en vivo.
+- El docente (o el admin, ahora que hereda ese permiso) inicia una práctica → se crea el documento en `practicas`
+- Al iniciar, se resuelve `required_ppe` consultando `practices` por el `area` de la materia — un solo lugar de donde sale ese dato, siempre
+- **Modo identificación:** compara solo contra los embeddings de `materias.alumnos_ids` de esa materia
+- **Confirmación (botón):** fija el `alumno_id` y cambia a modo indumentaria
+- **Modo indumentaria:** pipeline ya existente, resultado asociado a `practica_id` + `alumno_id`
+- Al resolverse, se guarda la `asistencia`; al finalizar la práctica, `practicas.estado = "finalizada"`
 
 ---
 
 ## Fase 12 — Reglas de cumplimiento y máquina de estados
-
-(Reutilizado del diseño anterior — asociación geométrica de PPE a personas, máquina de estados por `track_id`, heurística anti-duplicado — ahora operando dentro del modo indumentaria de la fase 11, con el resultado final vinculado al estudiante ya identificado en vez de quedar anónimo.)
-
-**Pendiente:** los umbrales de frames para confirmar/cerrar siguen ajustándose con pruebas.
+*(Sin cambios — ya construida y probada.)*
 
 ---
 
 ## Fase 13 — WebSockets en tiempo real
-
-Los tres tipos de mensaje existentes (`detecciones_frame`, `incumplimiento_iniciado`/`_actualizado`/`_resuelto`) se mantienen para el modo indumentaria. Se agregan dos nuevos para el modo identificación:
-
-- `estudiante_identificado` — `{ "estudiante_id", "nombre", "confianza" }`, cuando el sistema encuentra una coincidencia
-- `fase_cambiada` — `{ "fase": "identificacion" | "indumentaria" }`, cuando se confirma el cambio de fase
+*(Sin cambios en los tipos de mensaje ya definidos.)*
 
 ---
 
 ## Fase 14 — Streaming de video en vivo
-
-(Reutilizado sin cambios — `GET /api/v1/stream`, MJPEG servido desde `camera_service`.)
+*(Sin cambios.)*
 
 ---
 
 ## Fase 15 — Persistir asistencias con evidencia
-
-Reemplaza a la antigua persistencia de `violations` sueltas.
-
-- Al cerrarse la revisión de un estudiante: dibujar la evidencia (frame + rectángulo + texto de lo que falta) igual que antes
-- Insertar el documento en `asistencias`, vinculado a `estudiante_id` y `aula_id`, con `cumplio_indumentaria`, `faltantes`, `evidencia_url`
-- Servir la carpeta de evidencia como estática
+*(Sin cambios de mecanismo — documento de `asistencias` con `practica_id`.)*
 
 ---
 
-## Fase 16 — Historial y reportes por rol
+## Fase 16 — Reportes de asistencia por rol
 
-- `GET /asistencias` con filtros por fecha, aula, estudiante
-- **Coordinador:** puede consultar todas las asistencias de todas las aulas
-- **Alumno:** el endpoint filtra automáticamente por su propio `estudiante_id` — no puede pedir las de otro
-- **Docente:** puede consultar las asistencias de las aulas que tiene asignadas
-- Agrupación por día, paginación, agregaciones de Mongo para conteos
-
-**Concepto clave:** el filtro por rol se aplica del lado del backend a partir del usuario autenticado en el token — nunca confiando en un parámetro que mande el frontend.
+- Cabecera: materia, docente, fecha/hora; resumen de presentes/ausentes/cumplieron/no cumplieron
+- Tabla detallada por alumno, con estado de indumentaria por prenda
+- **Filtros por rol:** alumno (lo suyo), docente (sus materias), coordinador (sus docentes), admin (todo) — aplicados en el backend según el token, nunca según un parámetro que mande el frontend
 
 ---
 
-## Fase 17 — Dashboard de aulas y control del programa
+## Fase 17 — Gestión de materias y control de prácticas
 
-- CRUD de `aulas`: nombre, área (fija al crear), docente asignado, estudiantes matriculados
-- El docente inicia el programa de su aula → arranca el orquestador de la fase 11 en modo identificación
-- Botón de confirmación (fase 11) y botón de "Finalizar programa" — apaga cámara, detiene orquestador, cierra cualquier revisión que haya quedado abierta
+- Endpoint de inscripción: agregar un `alumno_id` existente a `materias.alumnos_ids`
+- `POST /practicas` — `require_role("docente")`; el admin pasa automáticamente por la expansión de permisos de la fase 4
+- `POST /practicas/{id}/end` — mismo permiso, botón "Finalizar práctica"
 
 ---
 
 ## Notas de cierre
 
-- Piezas que no bloquean el resto del desarrollo, resolubles en paralelo: el modelo de medicina, los umbrales de frames de la máquina de estados, y el umbral de similitud facial.
-- Fuera de alcance a propósito: recuperación de contraseña, verificación de correo, múltiples cámaras, y una fase formal de robustez/logging/pruebas — proyecto de demostración con ~15 estudiantes, no un sistema en producción.
+- Piezas resolubles en paralelo: modelo de medicina, umbrales de frames de la máquina de estados, umbral de similitud facial.
+- Fuera de alcance: recuperación de contraseña, múltiples cámaras, robustez/logging/pruebas formales.

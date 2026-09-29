@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.database import get_database
 from app.api.v1.dependencies import require_role, get_current_user
-from app.models.materia import MateriaCreate, MateriaInDB
+from app.models.materia import MateriaCreate, MateriaInDB, AlumnoEnrollRequest
 
 router = APIRouter()
 
@@ -18,18 +18,7 @@ async def crear_materia(data: MateriaCreate):
     if docente is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El docente indicado no existe")
 
-    # requerimientos = data.requerimientos
-    # if requerimientos is None:
-    #     catalogo = await database["practices"].find_one({"area": data.area})
-    #     if catalogo is None:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_404_NOT_FOUND,
-    #             detail=f"No hay PPE por defecto configurado para el área '{data.area}'",
-    #         )
-    #     requerimientos = catalogo["ppe_requerido"]
-
     doc = data.model_dump()
-    # doc["requerimientos"] = requerimientos
     doc["coordinador_id"] = docente["coordinador_id"]
     doc["alumnos_ids"] = []
 
@@ -43,7 +32,6 @@ async def listar_materias(docente_id: str | None = None, user: dict = Depends(ge
     database = get_database()
 
     if user["rol"] == "docente":
-        # Un docente nunca puede consultar las materias de otro, aunque mande el parámetro
         filtro = {"docente_id": user["user_id"]}
     elif user["rol"] == "coordinador":
         filtro = {"coordinador_id": user["user_id"]}
@@ -56,3 +44,46 @@ async def listar_materias(docente_id: str | None = None, user: dict = Depends(ge
 
     cursor = database["materias"].find(filtro)
     return [MateriaInDB(**doc) async for doc in cursor]
+
+
+@router.post(
+    "/materias/{materia_id}/alumnos",
+    response_model=MateriaInDB,
+    dependencies=[Depends(require_role("coordinador", "docente"))],
+)
+async def matricular_alumno_en_materia(
+    materia_id: str,
+    data: AlumnoEnrollRequest,
+    user: dict = Depends(get_current_user),
+):
+    if not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
+    database = get_database()
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    if materia is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
+
+    # Verifica autoridad sobre ESTA materia específica. El admin no entra en
+    # ninguna de estas dos condiciones (su rol nunca es "docente" ni "coordinador"
+    # literalmente), así que pasa sin restricción adicional.
+    if user["rol"] == "docente" and materia["docente_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes matricular alumnos en una materia que no impartes")
+    if user["rol"] == "coordinador" and materia["coordinador_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes matricular alumnos en una materia fuera de tu cargo")
+
+    alumno = await database["usuarios"].find_one({"codigo": data.codigo, "rol": "alumno"})
+    if alumno is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No existe un alumno con ese código")
+
+    alumno_id = str(alumno["_id"])
+    if alumno_id in materia["alumnos_ids"]:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El alumno ya está matriculado en esta materia")
+
+    await database["materias"].update_one(
+        {"_id": ObjectId(materia_id)},
+        {"$push": {"alumnos_ids": alumno_id}},
+    )
+
+    actualizada = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    return MateriaInDB(**actualizada)

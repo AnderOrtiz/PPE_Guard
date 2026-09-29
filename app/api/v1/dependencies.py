@@ -6,8 +6,7 @@ from app.core.security import decode_access_token
 bearer_scheme = HTTPBearer()
 
 # Jerarquía: el admin hereda todos los permisos del coordinador
-ROLE_EXPANSION = {"admin": {"admin", "coordinador"}}
-
+ROLE_EXPANSION = {"admin": {"admin", "coordinador", "docente"}}
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
     try:

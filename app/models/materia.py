@@ -39,3 +39,6 @@ class MateriaInDB(BaseModel):
     alumnos_ids: list[str] = []
 
     model_config = {"populate_by_name": True}
+
+class AlumnoEnrollRequest(BaseModel):
+    codigo: str
