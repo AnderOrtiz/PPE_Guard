@@ -14,3 +14,6 @@ class PracticaInDB(BaseModel):
     estado: Literal["activa", "finalizada"] = "activa"
 
     model_config = {"populate_by_name": True}
+
+class PracticaCreate(BaseModel):
+    materia_id: str

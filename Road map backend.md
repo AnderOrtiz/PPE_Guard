@@ -162,3 +162,63 @@ Alcance: ~15 estudiantes (demo). Login simple con JWT, identificado por `codigo`
 
 - Piezas resolubles en paralelo: modelo de medicina, umbrales de frames de la máquina de estados, umbral de similitud facial.
 - Fuera de alcance: recuperación de contraseña, múltiples cámaras, robustez/logging/pruebas formales.
+
+
+
+
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"codigo": "DOC001", "password": "cambiar123"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST http://127.0.0.1:8000/api/v1/practicas \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"materia_id": "6abb4962b4bea1a989cd2541"}'
+
+---
+
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"codigo": "DOC001", "password": "cambiar123"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc420de0664790be652748/end \
+  -H "Authorization: Bearer $TOKEN"
+
+
+  curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc4834c3878df1914a117f/end \
+  -H "Authorization: Bearer $TOKEN"
+
+  ander-ortiz@a PPE_Guard % curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
+null%                                                                                                                                          
+ander-ortiz@a PPE_Guard % curl -X POST http://127.0.0.1:8000/api/v1/practicas \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"materia_id": "6abb4962b4bea1a989cd2541"}'
+{"_id":"6abc4834c3878df1914a117f","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:22:28.146000","hora_inicio":"2026-09-29T23:22:28.146000","hora_fin":null,"estado":"activa"}%                                                         
+ander-ortiz@a PPE_Guard % curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
+{"_id":"6abc45e8e59c8e55b687b0aa","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:12:40.486000","hora_inicio":"2026-09-29T23:12:40.486000","hora_fin":null,"estado":"activa"}%                                                         
+ander-ortiz@a PPE_Guard % curl -X POST http://127.0.0.1:8000/api/v1/practicas/<PEGA_AQUI_EL_ID_DEL_PASO_5>/end \
+  -H "Authorization: Bearer $TOKEN"
+zsh: no such file or directory: PEGA_AQUI_EL_ID_DEL_PASO_5
+ander-ortiz@a PPE_Guard % curl -X POST http://127.0.0.1:8000/api/v1/practicas/<PEGA_AQUI_EL_ID_DEL_PASO_5>/end \
+  -H "Authorization: Bearer $TOKEN"
+zsh: no such file or directory: PEGA_AQUI_EL_ID_DEL_PASO_5
+ander-ortiz@a PPE_Guard %   curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc45e8e59c8e55b687b0aa/end \
+  -H "Authorization: Bearer $TOKEN"
+{"_id":"6abc45e8e59c8e55b687b0aa","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:12:40.486000","hora_inicio":"2026-09-29T23:12:40.486000","hora_fin":"2026-09-29T23:23:45.754000","estado":"finalizada"}%                             
+ander-ortiz@a PPE_Guard % curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
+{"_id":"6abc4834c3878df1914a117f","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:22:28.146000","hora_inicio":"2026-09-29T23:22:28.146000","hora_fin":null,"estado":"activa"}%                                                         
+ander-ortiz@a PPE_Guard % curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
+{"_id":"6abc4834c3878df1914a117f","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:22:28.146000","hora_inicio":"2026-09-29T23:22:28.146000","hora_fin":null,"estado":"activa"}%                                                         
+ander-ortiz@a PPE_Guard %   curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc45e8e59c8e55b687b0aa/end \
+  -H "Authorization: Bearer $TOKEN"
+{"detail":"Esta práctica ya fue finalizada"}%                                                                                                  
+ander-ortiz@a PPE_Guard %   curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc45e8e59c8e55b687b0aa/end \
+  -H "Authorization: Bearer $TOKEN"  curl -X POST http://127.0.0.1:8000/api/v1/practicas/6abc4834c3878df1914a117f/end \
+  -H "Authorization: Bearer $TOKEN"
+{"detail":"Esta práctica ya fue finalizada"}curl: (6) Could not resolve host: curl
+{"_id":"6abc4834c3878df1914a117f","materia_id":"6abb4962b4bea1a989cd2541","docente_id":"6abaac83f1b16007538b67e7","fecha":"2026-09-29T23:22:28.146000","hora_inicio":"2026-09-29T23:22:28.146000","hora_fin":"2026-09-29T23:25:25.102000","estado":"finalizada"}%                             
+ander-ortiz@a PPE_Guard % curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
+null%                                                                                                                                          

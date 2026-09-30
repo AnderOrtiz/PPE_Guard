@@ -1,5 +1,6 @@
 import numpy as np
 from deepface import DeepFace
+from bson import ObjectId
 
 FACE_MODEL_NAME = "Facenet"
 FACE_DETECTOR_BACKEND = "opencv"
@@ -59,3 +60,17 @@ def find_best_match(embedding: list[float], candidates: list[dict]) -> dict | No
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+async def get_candidatos_de_materia(database, materia_id: str) -> list[dict]:
+    """
+    Devuelve los documentos de alumno (con su face_embedding) matriculados
+    en una materia específica — nunca todos los alumnos del sistema.
+    """
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    if materia is None or not materia["alumnos_ids"]:
+        return []
+
+    ids_validos = [ObjectId(aid) for aid in materia["alumnos_ids"]]
+    cursor = database["usuarios"].find({"_id": {"$in": ids_validos}, "rol": "alumno"})
+    return [doc async for doc in cursor]
