@@ -17,3 +17,7 @@ class PracticaInDB(BaseModel):
 
 class PracticaCreate(BaseModel):
     materia_id: str
+
+
+class ConfirmarRequest(BaseModel):
+    alumno_id: str

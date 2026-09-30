@@ -74,4 +74,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/practicas/<PEGA_AQUI_EL_ID_DEL_PASO_5>
 curl http://127.0.0.1:8000/api/v1/practicas/active -H "Authorization: Bearer $TOKEN"
 ```
 
-La regla de oro para no repetir el error de la vez pasada: **siempre saca el `_id` de un `/practicas/active` fresco antes de finalizar**, nunca de un `curl` anterior que ya hiciste — así, aunque hayas reiniciado uvicorn o perdido la cuenta, el ID que uses para `.../end` es siempre el que Mongo dice que está realmente activo ahora mismo.
+
+Después de identificarte (Terminal 2 muestra estudiante_identificado con tu alumno_id), dispara en Terminal 3:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/practicas/<practica_id>/confirmar \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"alumno_id": "<el alumno_id que viste en el evento>"}'
+```
