@@ -32,7 +32,7 @@ Thumbs.db
 *.log
 
 # Modelos entrenados (pesos pueden pesar mucho — súbelos con Git LFS o por separado si aplica)
-*.pt
+# *.pt
 *.onnx
 
 # Frontend (si el repo incluye React más adelante)
