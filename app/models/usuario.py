@@ -57,6 +57,14 @@ class UsuarioOut(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+class AlumnoEnMateriaOut(BaseModel):
+    id: PyObjectId = Field(alias="_id")
+    codigo: str
+    nombre: str
+    carrera: str | None = None
+    facultad: str | None = None
+
+    model_config = {"populate_by_name": True}
 
 """
     {"codigo": "ADMIN001","password": "cambiar123"}
