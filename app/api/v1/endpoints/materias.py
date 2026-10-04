@@ -1,3 +1,4 @@
+from app.models.usuario import AlumnoEnMateriaOut
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -29,7 +30,9 @@ async def crear_materia(data: MateriaCreate):
     return MateriaInDB(**creada)
 
 
-@router.get("/materias", response_model=list[MateriaInDB], dependencies=[Depends(require_role("coordinador", "docente"))])
+@router.get("/materias", 
+            response_model=list[MateriaInDB],
+            dependencies=[Depends(require_role("coordinador", "docente"))])
 async def listar_materias(docente_id: str | None = None, user: dict = Depends(get_current_user)):
     database = get_database()
 
@@ -97,23 +100,62 @@ async def matricular_alumno_en_materia(
     return MateriaInDB(**actualizada)
 
 
-
-
-from app.models.usuario import AlumnoEnMateriaOut
-
-
 @router.get(
     "/materias/{materia_id}/alumnos",
     response_model=list[AlumnoEnMateriaOut],
     dependencies=[Depends(require_role("coordinador", "docente"))],
 )
 async def listar_alumnos_en_materia(materia_id: str):
+    if not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
     database = get_database()
-    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+
     if materia is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
 
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+
     alumnos_ids = materia["alumnos_ids"]
 
-    cursor = database["usuarios"].find({"_id": {"$in": [ObjectId(aid) for aid in alumnos_ids]}})
+    cursor = database["usuarios"].find(
+        {"_id": {"$in": [ObjectId(aid) for aid in alumnos_ids]}})
     return [AlumnoEnMateriaOut(**doc) async for doc in cursor]
+
+
+@router.delete(
+    "/materias/{materia_id}/alumnos/{alumno_id}",
+    response_model=MateriaInDB,
+    dependencies=[Depends(require_role("coordinador", "docente"))],
+)
+
+async def eliminar_alumno_de_materia(
+    materia_id: str,
+    alumno_id: str,
+    user: dict = Depends(get_current_user),
+):
+    if not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
+    database = get_database()
+
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+
+    if materia is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
+
+    if user["rol"] == "docente" and materia["docente_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes modificar una materia que no impartes")
+    if user["rol"] == "coordinador" and materia["coordinador_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes modificar una materia fuera de tu cargo")
+
+    if alumno_id not in materia["alumnos_ids"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ese alumno no está matriculado en esta materia")
+
+    await database["materias"].update_one(
+        {"_id": ObjectId(materia_id)},
+        {"$pull": {"alumnos_ids": alumno_id}},
+    )
+
+    actualizada = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    return MateriaInDB(**actualizada)
