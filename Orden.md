@@ -68,6 +68,11 @@ Copia el `_id` que te devuelve **este** comando — es la fuente de verdad, no l
 curl -X POST http://127.0.0.1:8000/api/v1/practicas/<PEGA_AQUI_EL_ID_DEL_PASO_5>/end \
   -H "Authorization: Bearer $TOKEN"
 ```
+---
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/practicas/6ac2f1bf81a02e8175d40c89/end \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 **7. Confirma en la Terminal 2** que los eventos dejaron de llegar, y en la Terminal 3 que `/practicas/active` vuelve a dar `null`:
 ```bash
@@ -82,4 +87,11 @@ curl -X POST http://127.0.0.1:8000/api/v1/practicas/<practica_id>/confirmar \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"alumno_id": "<el alumno_id que viste en el evento>"}'
+```
+---
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/practicas/6ac2f1bf81a02e8175d40c89/confirmar \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"alumno_id": "6abab6bb78cbda2a663394a4"}'
 ```
