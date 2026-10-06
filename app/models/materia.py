@@ -42,3 +42,10 @@ class MateriaInDB(BaseModel):
 
 class AlumnoEnrollRequest(BaseModel):
     codigo: str
+
+
+class MateriaUpdate(BaseModel):
+    nombre: str | None = None
+    carrera: str | None = None
+    facultad: str | None = None
+    aula: str | None = None

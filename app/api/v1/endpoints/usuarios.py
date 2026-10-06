@@ -75,3 +75,16 @@ async def crear_alumno(data: AlumnoCreate):
     doc["face_embedding"] = embedding
     return await _insertar_usuario(doc)
 
+
+@router.get("/usuarios/{usuario_id}", response_model=UsuarioOut, dependencies=[Depends(require_role("coordinador", "docente"))])
+async def obtener_usuario(usuario_id: str):
+    if not ObjectId.is_valid(usuario_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="usuario_id inválido")
+
+    database = get_database()
+    usuario = await database["usuarios"].find_one({"_id": ObjectId(usuario_id)})
+    if usuario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El usuario indicado no existe")
+
+    return UsuarioOut(**usuario)
+

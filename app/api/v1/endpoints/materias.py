@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.database import get_database
 from app.api.v1.dependencies import require_role, get_current_user
-from app.models.materia import MateriaCreate, MateriaInDB, AlumnoEnrollRequest
+from app.models.materia import MateriaCreate, MateriaInDB, MateriaUpdate, AlumnoEnrollRequest
 
 router = APIRouter()
 
@@ -49,6 +49,47 @@ async def listar_materias(docente_id: str | None = None, user: dict = Depends(ge
 
     cursor = database["materias"].find(filtro)
     return [MateriaInDB(**doc) async for doc in cursor]
+
+
+@router.get("/materias/{materia_id}", response_model=MateriaInDB, dependencies=[Depends(require_role("coordinador", "docente"))])
+async def obtener_materia(materia_id: str, user: dict = Depends(get_current_user)):
+    if not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
+    database = get_database()
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    if materia is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
+
+    if user["rol"] == "docente" and materia["docente_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes ver una materia que no impartes")
+    if user["rol"] == "coordinador" and materia["coordinador_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes ver una materia fuera de tu cargo")
+
+    return MateriaInDB(**materia)
+
+
+@router.patch("/materias/{materia_id}", response_model=MateriaInDB, dependencies=[Depends(require_role("coordinador"))])
+async def actualizar_materia(materia_id: str, data: MateriaUpdate, user: dict = Depends(get_current_user)):
+    if not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
+    database = get_database()
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    if materia is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
+
+    if user["rol"] == "coordinador" and materia["coordinador_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes modificar una materia fuera de tu cargo")
+
+    cambios = data.model_dump(exclude_none=True)
+    if not cambios:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se envió ningún campo para actualizar")
+
+    await database["materias"].update_one({"_id": ObjectId(materia_id)}, {"$set": cambios})
+
+    actualizada = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+    return MateriaInDB(**actualizada)
 
 
 @router.post(
@@ -111,10 +152,10 @@ async def listar_alumnos_en_materia(materia_id: str):
 
     database = get_database()
 
+    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
+
     if materia is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
-
-    materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
 
     alumnos_ids = materia["alumnos_ids"]
 
