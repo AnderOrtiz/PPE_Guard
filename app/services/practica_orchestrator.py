@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.services.camera_service import camera_service
 from app.services.face_service import get_face_embedding, find_best_match
 from app.services.yolo_service import detect
-from app.services.compliance_engine import ComplianceEngine
+from app.services.compliance_engine import PpeReview
 from app.services.evidence_service import save_evidence
 from app.services.asistencia_repository import create_asistencia
 from app.websockets.manager import manager
@@ -33,9 +33,8 @@ class PracticaOrchestrator:
         # Estado de la revisión de indumentaria en curso
         self._confirmed_alumno_id: str | None = None
         self._hora_identificacion: datetime | None = None
-        self._compliance_engine: ComplianceEngine | None = None
+        self._review: PpeReview | None = None
         self._review_deadline: float = 0.0
-        self._review_result = {"cumplio": True, "faltantes": [], "bbox": None}
         self._current_frame = None
 
     def start(self):
@@ -54,13 +53,7 @@ class PracticaOrchestrator:
 
         self._confirmed_alumno_id = alumno_id
         self._hora_identificacion = datetime.now(timezone.utc)
-        self._review_result = {"cumplio": True, "faltantes": [], "bbox": None}
-        self._compliance_engine = ComplianceEngine(
-            required_ppe=self.required_ppe,
-            on_episode_started=self._on_episode_started,
-            on_episode_updated=self._on_episode_updated,
-            on_episode_resolved=self._on_episode_resolved,
-        )
+        self._review = PpeReview(self.required_ppe)
         self._review_deadline = time.time() + REVIEW_DURATION_SECONDS
         self._fase = "indumentaria"
 
@@ -135,7 +128,7 @@ class PracticaOrchestrator:
             self._current_frame = frame
             detections = detect(frame, area=self.area)
             self._broadcast_detecciones(detections, frame.shape)
-            self._compliance_engine.process(detections)
+            self._review.process(detections)
 
         if time.time() >= self._review_deadline:
             self._finalizar_revision()
@@ -158,23 +151,18 @@ class PracticaOrchestrator:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
-    def _on_episode_started(self, episode_id, track_id, missing, bbox, is_reopen):
-        self._review_result = {"cumplio": False, "faltantes": list(missing), "bbox": bbox}
-
-    def _on_episode_updated(self, episode_id, missing):
-        self._review_result["faltantes"] = list(missing)
-
-    def _on_episode_resolved(self, episode_id):
-        self._review_result = {"cumplio": True, "faltantes": [], "bbox": None}
-
     def _finalizar_revision(self):
         alumno_id = self._confirmed_alumno_id
-        resultado = self._review_result
+        faltantes = self._review.missing()
+        cumplio = not faltantes
 
         evidencia_url = None
-        if not resultado["cumplio"] and resultado["bbox"] is not None and self._current_frame is not None:
+        if not cumplio and self._current_frame is not None:
+            # Si no se vio a la persona, la evidencia encuadra el frame completo
+            height, width = self._current_frame.shape[:2]
+            bbox = self._review.person_bbox or [0, 0, width - 1, height - 1]
             evidencia_url = save_evidence(
-                self._current_frame, resultado["bbox"], resultado["faltantes"],
+                self._current_frame, bbox, faltantes,
                 f"{self.practica_id}-{alumno_id}",
             )
 
@@ -182,8 +170,8 @@ class PracticaOrchestrator:
             practica_id=self.practica_id,
             alumno_id=alumno_id,
             hora_identificacion=self._hora_identificacion,
-            cumplio_indumentaria=resultado["cumplio"],
-            faltantes=resultado["faltantes"],
+            cumplio_indumentaria=cumplio,
+            faltantes=faltantes,
             evidencia_url=evidencia_url,
         ))
 
@@ -191,15 +179,15 @@ class PracticaOrchestrator:
             "evento": "asistencia_registrada",
             "practica_id": self.practica_id,
             "alumno_id": alumno_id,
-            "cumplio_indumentaria": resultado["cumplio"],
-            "faltantes": resultado["faltantes"],
+            "cumplio_indumentaria": cumplio,
+            "faltantes": faltantes,
             "evidencia_url": evidencia_url,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
         # Vuelve a modo identificación, libre para el siguiente alumno
         self._confirmed_alumno_id = None
-        self._compliance_engine = None
+        self._review = None
         self._last_identified_id = None
         self._last_identified_info = None
         self._fase = "identificacion"

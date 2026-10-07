@@ -529,6 +529,7 @@ export interface AsistenciaRegistrada {
 - **`estudiante_identificado` solo se emite cuando cambia la persona.** Si el mismo alumno sigue frente a la cámara, no se repite.
 - **No hay evento cuando el rostro se pierde.** Si el alumno se retira, el servidor olvida la identificación en silencio y la tarjeta del frontend queda desactualizada. Si el docente pulsa Confirmar en ese estado, llega un `409`: en ese caso, limpiar la tarjeta y avisar que el alumno vuelva a mirar a la cámara.
 - **Solo se puede confirmar al último identificado**, y solo en fase `identificacion`. Deshabilita el botón Confirmar durante `indumentaria`.
+- **Toda prenda requerida parte como faltante.** Solo sale de `faltantes` si el modelo la detecta puesta durante la revisión (en al menos 3 frames, y más veces de las que detecta su falta). Si la parte del cuerpo no se ve —alumno fuera de cuadro, de espaldas, muy lejos—, la prenda queda como faltante. Solo cuentan las prendas que están sobre el alumno revisado, que es la persona más grande del cuadro (la más cercana a la cámara): el casco de un compañero que pasa detrás no cuenta, y si el modelo no detecta a ninguna persona, no cuenta nada. Conviene indicarle al alumno que se pare solo y de cuerpo entero frente a la cámara.
 - **La revisión de indumentaria dura 6 segundos fijos.** Sirve para mostrar una cuenta regresiva desde que llega `fase_cambiada` con `indumentaria`.
 - Al terminar llegan seguidos `asistencia_registrada` y `fase_cambiada` (a `identificacion`). Al volver a `identificacion`, limpia las cajas del overlay y la tarjeta del alumno.
 - Si se confirma dos veces al mismo alumno en una práctica, se guardan dos asistencias; el reporte muestra solo una. Conviene marcar en la UI a los que ya pasaron.
@@ -629,7 +630,7 @@ El contenedor debe medir exactamente lo mismo que la imagen (sin `object-fit: co
 /static/evidence/2026-10-06/<practica_id>-<alumno_id>.jpg
 ```
 
-Hay que anteponerle la base y agregarle el token: `` `${VITE_API_URL}${evidencia_url}?token=${token}` ``. Solo existe cuando el alumno **no** cumplió; la foto ya trae dibujada la caja roja y el texto de lo que falta.
+Hay que anteponerle la base y agregarle el token: `` `${VITE_API_URL}${evidencia_url}?token=${token}` ``. Solo existe cuando el alumno **no** cumplió; la foto ya trae dibujada la caja roja (alrededor de la persona, o del frame completo si no se la detectó) y el texto de lo que falta.
 
 Requiere token (por query `token`, o por header `Authorization` si la pides con `fetch`). Cada quien ve solo lo suyo: el alumno sus propias fotos, el docente las de sus materias, el coordinador las de su cargo, el admin todas. `401` sin token, `403` fuera de tu alcance, `404` si no existe.
 
