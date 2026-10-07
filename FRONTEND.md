@@ -267,7 +267,8 @@ Todas las rutas llevan el prefijo `/api/v1`. "Auth" indica qué rol exige el bac
 | POST | `/usuarios/coordinadores` | admin | `{ codigo, password, nombre }` | `UsuarioOut` |
 | POST | `/usuarios/docentes` | coordinador | `{ codigo, password, nombre, facultad, coordinador_id }` | `UsuarioOut` |
 | POST | `/usuarios/alumnos` | coordinador, docente | `{ codigo, password, nombre, carrera, facultad }` | `UsuarioOut` |
-| GET | `/usuarios/{usuario_id}` | coordinador, docente | — | `UsuarioOut` |
+| GET | `/usuarios?rol=` | coordinador, docente | query opcional `rol`: `alumno` \| `docente` \| `coordinador` | `UsuarioOut[]`. El coordinador ve sus docentes y los alumnos de sus materias; el docente, los alumnos de sus materias; el admin, todos |
+| GET | `/usuarios/{usuario_id}` | coordinador, docente | — | `UsuarioOut`. Misma visibilidad que el listado (más uno mismo); fuera de ella responde `403` |
 
 Errores:
 
@@ -658,7 +659,6 @@ Cosas que el frontend va a necesitar y hoy no existen. Vale la pena resolverlas 
 
 | Qué falta | A qué afecta | Mientras tanto |
 |---|---|---|
-| **Listar usuarios** (docentes, coordinadores, alumnos) | El formulario de materia no puede ofrecer un selector de docente; el admin no puede elegir coordinador al crear un docente; no hay buscador de alumnos | Pedir el `_id` a mano (se ve en Mongo Express o en la respuesta al crear el usuario) |
 | **Listar las prácticas de una materia** | No hay forma directa de llegar al reporte de una práctica pasada | `GET /asistencias?materia_id=...` y agrupar por `practica_id`. Las prácticas sin ninguna asistencia no aparecen |
 | **Endpoints para el alumno** | Sus asistencias solo traen `practica_id` y `alumno_id`; no puede consultar materias, prácticas ni usuarios (`403`), así que no hay cómo mostrarle el nombre de la materia | Mostrar fecha, resultado, faltantes y evidencia |
 | **`/auth/me` y refresh de token** | El id y los datos del usuario | Decodificar el JWT; guardar `nombre` y `rol` del login |

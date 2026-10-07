@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,7 +7,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_database
 from app.core.security import hash_password
-from app.api.v1.dependencies import require_role
+from app.api.v1.dependencies import require_role, get_current_user
 from app.models.usuario import AlumnoCreate, DocenteCreate, CoordinadorCreate, UsuarioOut
 from app.services.camera_service import capture_single_frame
 from app.services.face_service import get_face_embedding
@@ -76,8 +77,40 @@ async def crear_alumno(data: AlumnoCreate):
     return await _insertar_usuario(doc)
 
 
+async def _filtro_visibilidad(user: dict) -> dict:
+    """Acota el listado a lo que el usuario tiene a su cargo, igual que listar_materias."""
+    if user["rol"] not in ("docente", "coordinador"):  # admin
+        return {}
+
+    database = get_database()
+    campo = "docente_id" if user["rol"] == "docente" else "coordinador_id"
+    alumnos_ids = set()
+    async for materia in database["materias"].find({campo: user["user_id"]}, {"alumnos_ids": 1}):
+        alumnos_ids.update(materia["alumnos_ids"])
+
+    alumnos = {"_id": {"$in": [ObjectId(aid) for aid in alumnos_ids]}}
+    if user["rol"] == "docente":
+        return alumnos
+    return {"$or": [alumnos, {"rol": "docente", "coordinador_id": user["user_id"]}]}
+
+
+@router.get("/usuarios", response_model=list[UsuarioOut], dependencies=[Depends(require_role("coordinador", "docente"))])
+async def listar_usuarios(
+    rol: Literal["alumno", "docente", "coordinador"] | None = None,
+    user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    filtro = await _filtro_visibilidad(user)
+    if rol is not None:
+        filtro["rol"] = rol
+
+    cursor = database["usuarios"].find(filtro).sort("nombre", 1)
+    return [UsuarioOut(**doc) async for doc in cursor]
+
+
 @router.get("/usuarios/{usuario_id}", response_model=UsuarioOut, dependencies=[Depends(require_role("coordinador", "docente"))])
-async def obtener_usuario(usuario_id: str):
+async def obtener_usuario(usuario_id: str, user: dict = Depends(get_current_user)):
     if not ObjectId.is_valid(usuario_id):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="usuario_id inválido")
 
@@ -86,5 +119,11 @@ async def obtener_usuario(usuario_id: str):
     if usuario is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El usuario indicado no existe")
 
-    return UsuarioOut(**usuario)
+    # Misma visibilidad que listar_usuarios; cada quien puede verse a sí mismo.
+    if usuario_id != user["user_id"]:
+        filtro = await _filtro_visibilidad(user)
+        visible = await database["usuarios"].find_one({"$and": [{"_id": usuario["_id"]}, filtro]}, {"_id": 1})
+        if visible is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes ver un usuario fuera de tu cargo")
 
+    return UsuarioOut(**usuario)
