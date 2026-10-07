@@ -28,6 +28,7 @@ class PracticaOrchestrator:
         self._fase = "identificacion"  # "identificacion" | "indumentaria"
 
         self._last_identified_id: str | None = None
+        self._last_identified_info: dict | None = None
 
         # Estado de la revisión de indumentaria en curso
         self._confirmed_alumno_id: str | None = None
@@ -72,6 +73,17 @@ class PracticaOrchestrator:
         })
         return True
 
+    def estado_actual(self) -> dict:
+        """Foto del estado para quien se conecta al WebSocket a mitad de la práctica."""
+        en_revision = self._fase == "indumentaria"
+        return {
+            "practica_id": self.practica_id,
+            "fase": self._fase,
+            "identificado": self._last_identified_info,
+            "alumno_id": self._confirmed_alumno_id if en_revision else None,
+            "segundos_restantes": max(0.0, self._review_deadline - time.time()) if en_revision else None,
+        }
+
     def _loop(self):
         while self._running:
             if self._fase == "identificacion":
@@ -89,11 +101,13 @@ class PracticaOrchestrator:
         embedding = get_face_embedding(frame, enforce_detection=False)
         if embedding is None:
             self._last_identified_id = None
+            self._last_identified_info = None
             return
 
         match = find_best_match(embedding, self.candidatos)
         if match is None:
             self._last_identified_id = None
+            self._last_identified_info = None
             return
 
         alumno_id = str(match["_id"])
@@ -101,14 +115,17 @@ class PracticaOrchestrator:
             return
 
         self._last_identified_id = alumno_id
-
-        manager.broadcast_from_thread({
-            "evento": "estudiante_identificado",
-            "practica_id": self.practica_id,
+        self._last_identified_info = {
             "alumno_id": alumno_id,
             "nombre": match["nombre"],
             "codigo": match["codigo"],
             "confianza": match["similarity"],
+        }
+
+        manager.broadcast_from_thread({
+            "evento": "estudiante_identificado",
+            "practica_id": self.practica_id,
+            **self._last_identified_info,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -184,6 +201,7 @@ class PracticaOrchestrator:
         self._confirmed_alumno_id = None
         self._compliance_engine = None
         self._last_identified_id = None
+        self._last_identified_info = None
         self._fase = "identificacion"
 
         manager.broadcast_from_thread({

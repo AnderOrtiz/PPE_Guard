@@ -17,3 +17,12 @@ def obtener(practica_id: str) -> PracticaOrchestrator | None:
 
 def eliminar(practica_id: str):
     _activos.pop(practica_id, None)
+
+def orquestador_activo() -> PracticaOrchestrator | None:
+    return next(iter(_activos.values()), None)
+
+
+def detener_todos():
+    for orquestador in _activos.values():
+        orquestador.stop()
+    _activos.clear()

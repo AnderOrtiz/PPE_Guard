@@ -2,9 +2,10 @@ import asyncio
 import time
 
 import cv2
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from app.api.v1.dependencies import require_role, get_current_user_media
 from app.services.camera_service import camera_service
 
 router = APIRouter()
@@ -35,7 +36,7 @@ async def _generate_mjpeg(request: Request):
         await asyncio.sleep(STREAM_INTERVAL_SECONDS)
 
 
-@router.get("/stream")
+@router.get("/stream", dependencies=[Depends(require_role("docente", "coordinador", auth=get_current_user_media))])
 async def video_stream(request: Request):
     return StreamingResponse(
         _generate_mjpeg(request),

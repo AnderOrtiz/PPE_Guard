@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     CONFIDENCE_THRESHOLD: float = 0.50
     IOU_THRESHOLD: float = 0.45
 
+    # Al arrancar, una práctica que quedó "activa" se reanuda solo si empezó
+    # hace menos de estas horas; si no, se cierra.
+    PRACTICA_RECUPERABLE_HORAS: int = 8
+
     # Autenticación
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

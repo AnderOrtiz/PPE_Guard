@@ -156,7 +156,7 @@ El servidor queda disponible en `http://127.0.0.1:8000`.
 - **Documentación interactiva:** `http://127.0.0.1:8000/docs`
 - **Salud del backend + Mongo:** `GET /api/v1/health` → `{"status": "ok", "mongo": "connected"}`
 - **Login de prueba:** `POST /api/v1/auth/login` con `{"codigo": "DOC001", "password": "cambiar123"}` → debe devolver un `access_token`
-- **Video en vivo:** abre `http://127.0.0.1:8000/api/v1/stream` directo en el navegador — deberías ver el feed de la cámara
+- **Video en vivo:** con una práctica activa, abre `http://127.0.0.1:8000/api/v1/stream?token=<access_token>` en el navegador (token de docente, coordinador o admin) — deberías ver el feed de la cámara
 
 ---
 
@@ -187,12 +187,6 @@ PPE_Guard/
 Corre el script como módulo, desde la raíz del proyecto, no como archivo suelto:
 ```bash
 python -m scripts.nombre_del_script
-```
-
-**`RuntimeError: Directory 'static' does not exist` al levantar uvicorn**
-La carpeta `static/evidence/` debe existir antes de que arranque la app. Créala si no existe:
-```bash
-mkdir -p static/evidence
 ```
 
 **El login da "Usuario o contraseña incorrectos" con credenciales que deberían ser válidas**

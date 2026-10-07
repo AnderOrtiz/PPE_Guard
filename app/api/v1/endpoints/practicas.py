@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.database import get_database
 from app.api.v1.dependencies import require_role, get_current_user
 from app.models.practica import PracticaCreate, PracticaInDB, ConfirmarRequest
-from app.services.face_service import get_candidatos_de_materia
-from app.services.practica_orchestrator import PracticaOrchestrator
+from app.services.practica_lifecycle import arrancar_orquestador
 from app.services import practica_registry
 
 router = APIRouter()
@@ -15,13 +14,17 @@ router = APIRouter()
 
 @router.post("/practicas", response_model=PracticaInDB, dependencies=[Depends(require_role("docente"))])
 async def iniciar_practica(data: PracticaCreate, user: dict = Depends(get_current_user)):
+    database = get_database()
+
     if practica_registry.hay_practica_activa():
+        en_curso = await database["practicas"].find_one({"estado": "activa"})
+        if en_curso is not None and en_curso["docente_id"] != user["user_id"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Hay una práctica en curso de otro docente; espera a que la finalice")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya hay una práctica en curso; finalízala antes de iniciar otra")
 
     if not ObjectId.is_valid(data.materia_id):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
 
-    database = get_database()
     materia = await database["materias"].find_one({"_id": ObjectId(data.materia_id)})
     if materia is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La materia indicada no existe")
@@ -45,31 +48,65 @@ async def iniciar_practica(data: PracticaCreate, user: dict = Depends(get_curren
     result = await database["practicas"].insert_one(doc)
     practica_id = str(result.inserted_id)
 
-    candidatos = await get_candidatos_de_materia(database, data.materia_id)
-
-    orquestador = PracticaOrchestrator(practica_id, materia["area"], required_ppe, candidatos)
-    orquestador.start()
-    practica_registry.registrar(practica_id, orquestador)
+    try:
+        await arrancar_orquestador(database, practica_id, materia, required_ppe)
+    except RuntimeError as exc:
+        # Sin cámara no hay práctica: no se deja el registro "activa" huérfano.
+        await database["practicas"].delete_one({"_id": result.inserted_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
     creada = await database["practicas"].find_one({"_id": result.inserted_id})
     return PracticaInDB(**creada)
 
 
+@router.get("/practicas", response_model=list[PracticaInDB], dependencies=[Depends(require_role("docente", "coordinador"))])
+async def listar_practicas(materia_id: str | None = None, user: dict = Depends(get_current_user)):
+    if materia_id is not None and not ObjectId.is_valid(materia_id):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materia_id inválido")
+
+    database = get_database()
+
+    materia_filtro = {}
+    if user["rol"] == "docente":
+        materia_filtro["docente_id"] = user["user_id"]
+    elif user["rol"] == "coordinador":
+        materia_filtro["coordinador_id"] = user["user_id"]
+    if materia_id is not None:
+        materia_filtro["_id"] = ObjectId(materia_id)
+
+    materia_ids = [str(m["_id"]) async for m in database["materias"].find(materia_filtro, {"_id": 1})]
+    if not materia_ids:
+        return []
+
+    cursor = database["practicas"].find({"materia_id": {"$in": materia_ids}}).sort("hora_inicio", -1)
+    return [PracticaInDB(**doc) async for doc in cursor]
+
+
 @router.get("/practicas/active", response_model=PracticaInDB | None, dependencies=[Depends(require_role("docente"))])
-async def practica_activa():
+async def practica_activa(user: dict = Depends(get_current_user)):
     if not practica_registry.hay_practica_activa():
         return None
 
+    filtro = {"estado": "activa"}
+    if user["rol"] == "docente":
+        filtro["docente_id"] = user["user_id"]
+
     database = get_database()
-    practica = await database["practicas"].find_one({"estado": "activa"})
+    practica = await database["practicas"].find_one(filtro)
     return PracticaInDB(**practica) if practica else None
 
 
 @router.post("/practicas/{practica_id}/confirmar", dependencies=[Depends(require_role("docente"))])
-async def confirmar_identificacion(practica_id: str, data: ConfirmarRequest):
+async def confirmar_identificacion(practica_id: str, data: ConfirmarRequest, user: dict = Depends(get_current_user)):
     orquestador = practica_registry.obtener(practica_id)
     if orquestador is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No hay una práctica activa con ese id")
+
+    if user["rol"] == "docente":
+        database = get_database()
+        practica = await database["practicas"].find_one({"_id": ObjectId(practica_id)})
+        if practica is None or practica["docente_id"] != user["user_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes confirmar en una práctica que no impartes")
 
     ok = orquestador.confirmar_identificacion(data.alumno_id)
     if not ok:

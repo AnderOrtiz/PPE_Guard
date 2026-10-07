@@ -40,6 +40,19 @@ class MateriaInDB(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+class MateriaAlumnoOut(BaseModel):
+    """Lo que ve un alumno de una materia en la que está matriculado."""
+    id: PyObjectId = Field(alias="_id")
+    nombre: str
+    area: Literal["civil", "medicina"]
+    carrera: str
+    facultad: str
+    aula: str
+    docente_nombre: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
 class AlumnoEnrollRequest(BaseModel):
     codigo: str
 
