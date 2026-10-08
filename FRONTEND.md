@@ -85,7 +85,14 @@ Devuelve el `UsuarioOut` del dueño del token (con su `_id`). Úsalo al cargar l
 
 ### `PATCH /api/v1/auth/me` — cualquier usuario logueado
 
-Cada usuario edita su propio perfil. Body: cualquier combinación de `nombre`, `correo`, `carrera`, `facultad`, `estatus_academico` (solo los que cambian). Devuelve el `UsuarioOut` actualizado.
+Cada usuario edita su propio perfil. Body: solo los campos que cambian. Devuelve el `UsuarioOut` actualizado.
+
+| Rol | Campos que puede cambiar de sí mismo |
+|---|---|
+| alumno, docente | `nombre`, `correo` |
+| coordinador, admin | `nombre`, `correo`, `carrera`, `facultad`, `estatus_academico` |
+
+- `403` — `"Solo un coordinador puede cambiar tu carrera, facultad o estatus académico"`: un alumno o docente envió alguno de esos tres campos. No se guarda nada de esa petición, ni siquiera el nombre. En el formulario de perfil de alumno y docente, mostrarlos como solo lectura.
 
 - `codigo` y `rol` no se pueden cambiar: si se envían, se ignoran.
 - `400` — `"No se envió ningún campo para actualizar"`.
@@ -126,7 +133,8 @@ Roles: `alumno`, `docente`, `coordinador`, `admin`. El admin pasa todas las vali
 | Listar / ver materias | ❌ | solo las que imparte | solo las de su cargo | todas |
 | Crear / editar materia | ❌ | ❌ | ✅ (editar: solo las suyas) | ✅ |
 | Matricular / quitar alumnos de una materia | ❌ | solo en las suyas | solo en las suyas | ✅ |
-| Editar su propio perfil y cambiar su contraseña | ✅ | ✅ | ✅ | ✅ |
+| Editar su nombre y correo, y cambiar su contraseña | ✅ | ✅ | ✅ | ✅ |
+| Editar carrera, facultad y estatus académico | ❌ | ❌ | los suyos y los de alumnos y docentes de su cargo | los de cualquiera |
 | Resetear la contraseña de otro usuario | ❌ | ❌ | alumnos y docentes de su cargo | cualquiera |
 | Crear alumno (con captura facial) | ❌ | ✅ | ✅ | ✅ |
 | Encender / apagar la vista previa de la cámara | ❌ | ✅ | ✅ | ✅ |
@@ -169,13 +177,17 @@ export interface UsuarioOut {
   coordinador_id: string | null;    // solo docentes
 }
 
-// Body de PATCH /auth/me: solo los campos que cambian
-export interface PerfilUpdate {
-  nombre?: string;
-  correo?: string;
+// Body de PATCH /usuarios/{id}. Solo coordinador y admin
+export interface DatosAcademicosUpdate {
   carrera?: string;
   facultad?: string;
   estatus_academico?: string;
+}
+
+// Body de PATCH /auth/me. Alumno y docente: solo nombre y correo
+export interface PerfilUpdate extends DatosAcademicosUpdate {
+  nombre?: string;
+  correo?: string;
 }
 
 export interface AlumnoEnMateriaOut {
@@ -322,7 +334,8 @@ Todas las rutas llevan el prefijo `/api/v1`. "Auth" indica qué rol exige el bac
 |---|---|---|---|---|
 | POST | `/usuarios/coordinadores` | admin | `{ codigo, password, nombre }` | `UsuarioOut` |
 | POST | `/usuarios/docentes` | coordinador | `{ codigo, password, nombre, facultad }` (el admin agrega `coordinador_id`) | `UsuarioOut` |
-| POST | `/usuarios/alumnos` | coordinador, docente | `{ codigo, password, nombre, materias_ids? }` | `UsuarioOut` |
+| POST | `/usuarios/alumnos` | coordinador, docente | `{ codigo, password, nombre, materias_ids? }` (el coordinador puede agregar `carrera`, `facultad`) | `UsuarioOut` |
+| PATCH | `/usuarios/{usuario_id}` | coordinador | `{ carrera?, facultad?, estatus_academico? }` | `UsuarioOut`. Datos académicos de otro usuario |
 | POST | `/usuarios/{usuario_id}/password` | coordinador | `{ password_nueva }` | `204` sin cuerpo. Resetea la contraseña de otro usuario |
 | GET | `/usuarios?rol=` | coordinador, docente | query opcional `rol`: `alumno` \| `docente` \| `coordinador` | `UsuarioOut[]`. El coordinador ve sus docentes y los alumnos de sus materias; el docente, los alumnos de sus materias; el admin, todos |
 | GET | `/usuarios/{usuario_id}` | coordinador, docente | — | `UsuarioOut`. Misma visibilidad que el listado (más uno mismo); fuera de ella responde `403` |
@@ -345,17 +358,21 @@ Errores:
 
 **Crear docente.** Un coordinador solo manda `codigo`, `password`, `nombre` y `facultad`: el docente queda a su cargo (si envía `coordinador_id`, se ignora). El admin sí debe mandar `coordinador_id`, elegido con `GET /usuarios?rol=coordinador`.
 
-**Crear alumno.** Solo se piden `codigo`, `password` y `nombre`; el resto del perfil (`correo`, `carrera`, `facultad`, `estatus_academico`) lo completa el alumno después con `PATCH /auth/me`. `carrera` y `facultad` se siguen aceptando en el body si se quieren mandar.
+**Crear alumno.** Solo se piden `codigo`, `password` y `nombre`; después, el alumno completa su `correo` con `PATCH /auth/me` y el coordinador sus datos académicos con `PATCH /usuarios/{usuario_id}`. El correo no se pide en el alta: lo agrega el propio alumno cuando ya inició sesión.
+
+- `carrera` y `facultad` son opcionales y solo los puede mandar un coordinador o el admin. Si los manda un docente: `403` — `"Solo un coordinador puede asignar la carrera y la facultad de un alumno"`, y no se crea el alumno. En el formulario del docente, no mostrar esos campos.
 
 - `materias_ids` (opcional) matricula al alumno en esas materias al crearlo. Para el selector: `GET /materias` ya devuelve solo las del coordinador (o las que imparte el docente).
 - Se valida **antes** de la captura facial: `422` — `"materias_ids contiene un id inválido"`; `404` — `"Alguna de las materias indicadas no existe"`; `403` — `"No puedes matricular alumnos en una materia fuera de tu cargo"` / `"...que no impartes"`. Si una falla, no se crea el alumno.
-- Conviene matricularlo en al menos una: un alumno sin materias solo lo ve el admin, y su coordinador no podría resetearle la contraseña.
+- Conviene matricularlo en al menos una. Un alumno sin materias no aparece en `GET /usuarios` de ningún coordinador o docente, y su coordinador no puede editarlo ni resetearle la contraseña. **Sí se le puede matricular después:** `POST /materias/{materia_id}/alumnos` lo busca por `codigo` entre todos los alumnos, sin importar la visibilidad. En cuanto está en una materia del coordinador, queda a su cargo.
 
-**Resetear contraseña** (`POST /usuarios/{usuario_id}/password`). No pide la contraseña anterior.
+**Editar datos académicos** (`PATCH /usuarios/{usuario_id}`) y **resetear contraseña** (`POST /usuarios/{usuario_id}/password`). Los dos tienen el mismo alcance:
 
-- Coordinador: solo alumnos y docentes de su cargo (la misma visibilidad de `GET /usuarios`). `403` — `"Solo puedes resetear la contraseña de alumnos y docentes"` / `"No puedes resetear la contraseña de un usuario fuera de tu cargo"`.
+- Coordinador: solo alumnos y docentes de su cargo (la misma visibilidad de `GET /usuarios`). `403` — `"Solo puedes modificar a alumnos y docentes"` / `"No puedes modificar a un usuario fuera de tu cargo"`.
 - Admin: cualquier usuario, incluidos los coordinadores.
 - Docente y alumno: `403`. `404` — `"El usuario indicado no existe"`.
+- El PATCH solo acepta `carrera`, `facultad` y `estatus_academico`; `nombre` y `correo` los cambia cada usuario. `400` — `"No se envió ningún campo para actualizar"`.
+- El reset no pide la contraseña anterior.
 
 ### 6.4 Materias
 
@@ -832,7 +849,7 @@ Los mensajes de `detail` ya vienen en español y redactados para el usuario: se 
 | `/materias` | docente, coordinador, admin | Lista de materias | `GET /materias` |
 | `/materias/nueva` | coordinador, admin | Crear materia | `POST /materias` |
 | `/materias/:id` | docente, coordinador, admin | Detalle, alumnos matriculados, matricular por código, quitar, editar | `GET /materias/{id}`, `GET/POST/DELETE .../alumnos`, `PATCH /materias/{id}` |
-| `/perfil` | todos | Ver y editar los datos propios; cambiar la contraseña | `GET/PATCH /auth/me`, `POST /auth/me/password` |
+| `/perfil` | todos | Ver los datos propios, editar nombre y correo (el coordinador y el admin, también los académicos); cambiar la contraseña | `GET/PATCH /auth/me`, `POST /auth/me/password` |
 | `/usuarios/nuevo` | según tabla de permisos | Alta de alumno (con vista previa de la cámara y captura facial), docente o coordinador | `POST /usuarios/*`, `GET /usuarios?rol=`, `GET /materias` (para `materias_ids`), `POST/DELETE /camara/vista-previa`, stream |
 | `/practica` | docente, admin | Sesión en vivo: video, overlay, tarjeta del identificado, Confirmar, Finalizar | `POST /practicas`, `GET /practicas/active`, `.../confirmar`, `.../end`, WebSocket, stream |
 | `/asistencias` | docente, coordinador, admin | Historial con filtros | `GET /asistencias` |

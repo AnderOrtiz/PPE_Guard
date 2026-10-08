@@ -202,11 +202,18 @@ Un detalle importante: **los alumnos no tienen dueño propio**. Su visibilidad s
 
 ### Perfil
 
-Todo usuario tiene los mismos datos de perfil: `codigo`, `nombre`, `correo`, `carrera`, `estatus_academico` y `facultad`. Al crear un usuario solo se pide lo mínimo (alumno: código, nombre y contraseña; docente: además la facultad); el resto queda vacío y **lo completa el propio usuario** con `PATCH /auth/me`.
+Todo usuario tiene los mismos datos de perfil: `codigo`, `nombre`, `correo`, `carrera`, `estatus_academico` y `facultad`. Al crear un usuario solo se pide lo mínimo (alumno: código, nombre y contraseña; docente: además la facultad); el resto se completa después.
 
-- `codigo` y `rol` no son editables: el código es la credencial de acceso y el rol define los permisos.
-- Nadie edita el perfil de otro usuario; no hay endpoint para eso.
-- `estatus_academico` es texto libre y lo edita el propio usuario, como el resto.
+| Campo | Quién lo cambia | Endpoint |
+|---|---|---|
+| `nombre`, `correo` | El propio usuario | `PATCH /auth/me` |
+| `carrera`, `facultad`, `estatus_academico` | Coordinador (los de alumnos y docentes de su cargo, y los suyos) y admin (los de cualquiera) | `PATCH /usuarios/{id}`; los propios, `PATCH /auth/me` |
+| `codigo`, `rol` | Nadie | — |
+
+- Los datos académicos los fija la coordinación: si un alumno o docente los envía en `PATCH /auth/me`, la petición entera se rechaza con `403`. Lo mismo si un docente manda `carrera` o `facultad` al crear un alumno.
+- El correo nunca se pide al crear: lo agrega el propio usuario cuando ya inició sesión.
+- El alcance del coordinador es el de "solo lo mío". Un alumno sin materias queda fuera hasta que se le matricula; matricularlo siempre es posible, porque `POST /materias/{id}/alumnos` lo busca por código sin filtrar por visibilidad.
+- `estatus_academico` es texto libre.
 
 ---
 

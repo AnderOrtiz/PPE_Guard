@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.database import get_database
 from app.core.security import hash_password, verify_password, create_access_token
-from app.api.v1.dependencies import get_current_user
-from app.models.usuario import UsuarioLogin, TokenResponse, UsuarioOut, PerfilUpdate, PasswordCambio
+from app.api.v1.dependencies import get_current_user, tiene_rol
+from app.models.usuario import UsuarioLogin, TokenResponse, UsuarioOut, PerfilUpdate, DatosAcademicosUpdate, PasswordCambio
 
 router = APIRouter()
 
@@ -45,6 +45,13 @@ async def actualizar_perfil(data: PerfilUpdate, user: dict = Depends(get_current
     cambios = data.model_dump(exclude_none=True)
     if not cambios:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se envió ningún campo para actualizar")
+
+    # Carrera, facultad y estatus académico los fija la coordinación (PATCH /usuarios/{id})
+    if not tiene_rol(user, "coordinador") and cambios.keys() & DatosAcademicosUpdate.model_fields.keys():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo un coordinador puede cambiar tu carrera, facultad o estatus académico",
+        )
 
     database = get_database()
     await database["usuarios"].update_one({"_id": usuario["_id"]}, {"$set": cambios})

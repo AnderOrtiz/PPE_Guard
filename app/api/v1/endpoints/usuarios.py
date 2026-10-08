@@ -7,8 +7,8 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_database
 from app.core.security import hash_password
-from app.api.v1.dependencies import require_role, get_current_user
-from app.models.usuario import AlumnoCreate, DocenteCreate, CoordinadorCreate, PasswordReset, UsuarioOut
+from app.api.v1.dependencies import require_role, get_current_user, tiene_rol
+from app.models.usuario import AlumnoCreate, DocenteCreate, CoordinadorCreate, DatosAcademicosUpdate, PasswordReset, UsuarioOut
 from app.services.camera_service import capture_single_frame
 from app.services.face_service import get_face_embedding
 
@@ -85,6 +85,9 @@ async def crear_alumno(data: AlumnoCreate, user: dict = Depends(get_current_user
     # tiene sentido hacer esperar al usuario por la cámara para rechazarlo después.
     if not await _codigo_disponible(data.codigo):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un usuario con ese código")
+    # Los datos académicos los fija la coordinación, también en el alta
+    if not tiene_rol(user, "coordinador") and (data.carrera is not None or data.facultad is not None):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo un coordinador puede asignar la carrera y la facultad de un alumno")
     materias_ids = await _validar_materias_para_matricular(data.materias_ids, user)
 
     frame = await asyncio.to_thread(capture_single_frame)
@@ -162,12 +165,9 @@ async def obtener_usuario(usuario_id: str, user: dict = Depends(get_current_user
     return UsuarioOut(**usuario)
 
 
-@router.post(
-    "/usuarios/{usuario_id}/password",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_role("coordinador"))],
-)
-async def resetear_password(usuario_id: str, data: PasswordReset, user: dict = Depends(get_current_user)):
+async def _alumno_o_docente_a_cargo(usuario_id: str, user: dict) -> dict:
+    """El usuario sobre el que un coordinador puede actuar: alumnos y docentes de su cargo.
+    El admin puede con cualquiera."""
     if not ObjectId.is_valid(usuario_id):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="usuario_id inválido")
 
@@ -176,16 +176,41 @@ async def resetear_password(usuario_id: str, data: PasswordReset, user: dict = D
     if usuario is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El usuario indicado no existe")
 
-    # El coordinador solo resetea a alumnos y docentes de su cargo; el admin, a cualquiera.
     if user["rol"] == "coordinador":
         if usuario["rol"] not in ("alumno", "docente"):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo puedes resetear la contraseña de alumnos y docentes")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo puedes modificar a alumnos y docentes")
         filtro = await _filtro_visibilidad(user)
         visible = await database["usuarios"].find_one({"$and": [{"_id": usuario["_id"]}, filtro]}, {"_id": 1})
         if visible is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes resetear la contraseña de un usuario fuera de tu cargo")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No puedes modificar a un usuario fuera de tu cargo")
 
-    await database["usuarios"].update_one(
+    return usuario
+
+
+@router.patch("/usuarios/{usuario_id}", response_model=UsuarioOut, dependencies=[Depends(require_role("coordinador"))])
+async def actualizar_datos_academicos(usuario_id: str, data: DatosAcademicosUpdate, user: dict = Depends(get_current_user)):
+    usuario = await _alumno_o_docente_a_cargo(usuario_id, user)
+
+    cambios = data.model_dump(exclude_none=True)
+    if not cambios:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se envió ningún campo para actualizar")
+
+    database = get_database()
+    await database["usuarios"].update_one({"_id": usuario["_id"]}, {"$set": cambios})
+
+    actualizado = await database["usuarios"].find_one({"_id": usuario["_id"]})
+    return UsuarioOut(**actualizado)
+
+
+@router.post(
+    "/usuarios/{usuario_id}/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role("coordinador"))],
+)
+async def resetear_password(usuario_id: str, data: PasswordReset, user: dict = Depends(get_current_user)):
+    usuario = await _alumno_o_docente_a_cargo(usuario_id, user)
+
+    await get_database()["usuarios"].update_one(
         {"_id": usuario["_id"]},
         {"$set": {"password_hash": hash_password(data.password_nueva)}},
     )

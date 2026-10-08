@@ -41,19 +41,23 @@ class DocenteCreate(_UsuarioBaseCreate):
 
 
 class AlumnoCreate(_UsuarioBaseCreate):
-    # El resto del perfil lo completa el propio alumno después (PATCH /auth/me)
+    # Opcionales y solo para coordinador o admin; el correo lo agrega el alumno después (PATCH /auth/me)
     carrera: str | None = None
     facultad: str | None = None
     materias_ids: list[str] = []  # materias en las que queda matriculado al crearlo
 
 
-class PerfilUpdate(BaseModel):
-    """Lo que cada usuario puede cambiar de sí mismo. El código y el rol no se tocan."""
-    nombre: str | None = Field(default=None, min_length=1)
-    correo: EmailStr | None = None
+class DatosAcademicosUpdate(BaseModel):
+    """Los decide la coordinación: alumnos y docentes no pueden cambiárselos a sí mismos."""
     carrera: str | None = None
     facultad: str | None = None
     estatus_academico: str | None = None
+
+
+class PerfilUpdate(DatosAcademicosUpdate):
+    """Lo que cada usuario puede cambiar de sí mismo. El código y el rol no se tocan."""
+    nombre: str | None = Field(default=None, min_length=1)
+    correo: EmailStr | None = None
 
 
 class PasswordCambio(BaseModel):
