@@ -303,7 +303,7 @@ Código: `app/services/face_service.py`.
 
 El modelo **Facenet** recibe la imagen de un rostro y devuelve un *embedding*: una lista de 128 números. Esa lista funciona como una huella: dos fotos de la misma persona dan listas parecidas, y fotos de personas distintas dan listas diferentes.
 
-El sistema **no guarda fotos de los rostros**. Guarda solo esos 128 números, en el campo `face_embedding` del alumno.
+El sistema **no guarda fotos de los rostros**. Guarda solo esos 128 números, **cifrados**, en el campo `face_embedding` del alumno.
 
 ### Registro (una sola vez por alumno)
 
@@ -312,7 +312,36 @@ Al crear un alumno (`POST /usuarios/alumnos`):
 1. Se captura una foto con la cámara del servidor.
 2. DeepFace localiza el rostro y calcula el embedding.
 3. Si no hay **exactamente un rostro**, se rechaza con `422`. Cero rostros no sirve, y dos sería ambiguo.
-4. El embedding se guarda en Mongo.
+4. El embedding se cifra y se guarda en Mongo.
+
+### Cifrado del rostro
+
+Código: `app/core/cifrado.py`.
+
+En la base nunca queda el vector en claro: `face_embedding` es un texto cifrado. Quien obtenga una copia de Mongo sin la clave no puede leer ni usar los rostros.
+
+**No es lo mismo que con las contraseñas.** Una contraseña se guarda como *hash*: es irreversible, y funciona porque basta comprobar si lo que escribe el usuario es *idéntico*. Un rostro nunca es idéntico dos veces; para reconocerlo hay que medir qué tan *parecidos* son dos vectores, y un hash destruye esa información. Por eso el rostro se **cifra** (reversible, con una clave) en vez de hashearse.
+
+| | Contraseña | Rostro |
+|---|---|---|
+| Técnica | Hash (bcrypt) | Cifrado (Fernet: AES + firma) |
+| ¿Se puede recuperar el original? | No, nadie | Sí, solo con `FACE_EMBEDDING_KEY` |
+| ¿Dónde está el secreto? | No hay | En `.env` |
+
+Cómo funciona:
+
+- Al registrar un alumno, el vector se cifra antes de guardarlo.
+- Al iniciar una práctica, se descifran solo los rostros de los alumnos de esa materia. Viven descifrados **en memoria** mientras dura la práctica.
+- El cifrado va firmado: un valor alterado en la base se rechaza en vez de producir un vector basura.
+
+**La clave (`FACE_EMBEDDING_KEY`):**
+
+- Es obligatoria: sin ella el backend no arranca.
+- **Si se pierde o se cambia, los rostros registrados quedan ilegibles** y hay que volver a registrar a todos los alumnos. Hay que guardar una copia fuera del servidor.
+- Con una clave equivocada, iniciar una práctica responde `500` con un mensaje que lo indica, y la práctica no queda creada.
+- Protege de quien acceda a la base, no de quien acceda al servidor: la clave está en el mismo equipo, en `.env`. No debe subirse al repositorio ni guardarse junto a los respaldos de Mongo.
+
+**Alumnos registrados antes del cifrado.** Sus vectores quedaron en claro (una lista de números). El sistema los sigue leyendo, y se cifran con `python -m scripts.cifrar_embeddings` (se puede correr varias veces; no toca los ya cifrados).
 
 ### Identificación (durante la práctica)
 
@@ -644,7 +673,7 @@ MongoDB, con el driver asíncrono de `pymongo`.
 
 | Colección | Qué guarda | Campos clave |
 |---|---|---|
-| `usuarios` | Todos los roles | `codigo` (único), `rol`, `password_hash`, `face_embedding` (alumnos), `coordinador_id` (docentes), perfil: `nombre`, `correo`, `carrera`, `estatus_academico`, `facultad` |
+| `usuarios` | Todos los roles | `codigo` (único), `rol`, `password_hash`, `face_embedding` (alumnos, cifrado), `coordinador_id` (docentes), perfil: `nombre`, `correo`, `carrera`, `estatus_academico`, `facultad` |
 | `materias` | Las materias | `area`, `docente_id`, `coordinador_id`, `alumnos_ids` |
 | `practices` | Catálogo de PPE por área | `area`, `ppe_requerido` |
 | `practicas` | Las sesiones de práctica | `materia_id`, `docente_id`, `hora_inicio`, `hora_fin`, `estado` |
@@ -673,6 +702,7 @@ Se pueden cambiar con una variable de entorno, sin tocar código.
 | Parámetro | Valor | Qué controla | Cuándo cambiarlo |
 |---|---|---|---|
 | `JWT_SECRET_KEY` | (obligatorio) | Clave con la que se firman los tokens | Debe ser única y secreta en cada entorno |
+| `FACE_EMBEDDING_KEY` | (obligatorio) | Clave con la que se cifran los rostros en la base | **Nunca**, salvo que se vaya a registrar de nuevo a todos los alumnos |
 | `JWT_EXPIRE_MINUTES` | 480 | Duración del token (8 horas) | Bajarlo si se quiere más seguridad; subirlo si las jornadas son más largas |
 | `JWT_ALGORITHM` | `HS256` | Algoritmo de firma | Normalmente no se toca |
 | `ALLOWED_ORIGINS` | `localhost:5173`, `localhost:3000` | Desde qué direcciones puede llamar el frontend (CORS) | Al desplegar, o si el frontend usa otro puerto |
@@ -761,7 +791,7 @@ Con `0.10`, una persona cuya caja mide 200 × 400 px se evalúa con una zona de 
 
 | Riesgo | Detalle |
 |---|---|
-| **Datos biométricos** | Los embeddings faciales son datos personales sensibles y se guardan en Mongo sin cifrar. Conviene revisar qué exige la normativa local sobre su tratamiento y el consentimiento de los alumnos |
+| **Datos biométricos** | Los embeddings faciales son datos personales sensibles. Se guardan cifrados, pero la clave vive en el `.env` del mismo servidor, y durante una práctica están descifrados en memoria. Conviene revisar qué exige la normativa local sobre su tratamiento y el consentimiento de los alumnos |
 | **Fotos de evidencia en disco** | Se guardan sin cifrar en `static/evidence/` y no hay política de borrado |
 | **Token en la URL** | En WebSocket, video y evidencias el token queda en el historial y en los logs |
 | **Tokens no revocables** | Un token robado sirve hasta que expira |
@@ -780,7 +810,7 @@ Con `0.10`, una persona cuya caja mide 200 × 400 px se evalúa con una zona de 
 ## 15. Preguntas frecuentes
 
 **¿Se guardan las fotos de los rostros de los alumnos?**
-No. Se guarda solo el embedding, una lista de 128 números. De esos números no se puede reconstruir la foto. Sí se guardan fotos cuando un alumno no cumple con la indumentaria (evidencia).
+No. Se guarda solo el embedding, una lista de 128 números, y cifrado. De esos números no se puede reconstruir la foto. Sí se guardan fotos cuando un alumno no cumple con la indumentaria (evidencia).
 
 **¿Por qué el sistema no reconoce a un alumno?**
 Las causas habituales, en orden: no está matriculado en la materia de la práctica, se matriculó después de iniciarla, hay poca luz o está de perfil, hay dos rostros en cuadro, o su foto de registro salió mal.

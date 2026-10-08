@@ -123,7 +123,7 @@ Administra una parte del sistema: sus docentes, sus materias y los alumnos de es
 - **Es el único** que crea coordinadores, y el único que puede resetear la contraseña de un coordinador.
 - **Puede iniciar prácticas** de cualquier materia. La práctica queda a nombre del docente de la materia, no del admin.
 - **No tiene** pantallas de alumno: no tiene asistencias ni materias propias.
-- **Cómo nace:** no hay endpoint para crear admins. El primero sale del script `python -m scripts.seed_usuarios`.
+- **Cómo nace:** no hay endpoint para crear admins. El primero sale del script `python -m scripts.inicializar`.
 
 ---
 
@@ -159,6 +159,7 @@ Si un alumno o docente intenta cambiar un dato académico propio, la petición e
 - Si un alumno o docente olvida su contraseña, se la resetea su coordinador. Si la olvida un coordinador, el admin.
 - No hay recuperación por correo ni regla de complejidad: solo se rechaza la contraseña vacía.
 - Las contraseñas se guardan cifradas con bcrypt. Nadie puede verlas, ni el admin: solo reemplazarlas.
+- El rostro de cada alumno también se guarda cifrado, y ningún rol puede verlo ni descargarlo: la API nunca lo devuelve.
 
 ---
 

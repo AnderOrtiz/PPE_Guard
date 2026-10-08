@@ -2,6 +2,8 @@ import numpy as np
 from deepface import DeepFace
 from bson import ObjectId
 
+from app.core.cifrado import descifrar_embedding
+
 FACE_MODEL_NAME = "Facenet"
 FACE_DETECTOR_BACKEND = "opencv"
 
@@ -66,6 +68,7 @@ async def get_candidatos_de_materia(database, materia_id: str) -> list[dict]:
     """
     Devuelve los documentos de alumno (con su face_embedding) matriculados
     en una materia específica — nunca todos los alumnos del sistema.
+    El face_embedding llega ya descifrado: solo vive así en memoria, durante la práctica.
     """
     materia = await database["materias"].find_one({"_id": ObjectId(materia_id)})
     if materia is None or not materia["alumnos_ids"]:
@@ -73,4 +76,7 @@ async def get_candidatos_de_materia(database, materia_id: str) -> list[dict]:
 
     ids_validos = [ObjectId(aid) for aid in materia["alumnos_ids"]]
     cursor = database["usuarios"].find({"_id": {"$in": ids_validos}, "rol": "alumno"})
-    return [doc async for doc in cursor]
+    return [
+        {**doc, "face_embedding": descifrar_embedding(doc["face_embedding"])}
+        async for doc in cursor
+    ]

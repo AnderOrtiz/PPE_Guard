@@ -7,6 +7,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_database
 from app.core.security import hash_password
+from app.core.cifrado import cifrar_embedding
 from app.api.v1.dependencies import require_role, get_current_user, tiene_rol
 from app.models.usuario import AlumnoCreate, DocenteCreate, CoordinadorCreate, DatosAcademicosUpdate, PasswordReset, UsuarioOut
 from app.services.camera_service import capture_single_frame
@@ -102,7 +103,7 @@ async def crear_alumno(data: AlumnoCreate, user: dict = Depends(get_current_user
     doc = data.model_dump(exclude={"password", "materias_ids"})
     doc["password_hash"] = hash_password(data.password)
     doc["rol"] = "alumno"
-    doc["face_embedding"] = embedding
+    doc["face_embedding"] = cifrar_embedding(embedding)  # en la base nunca queda el vector en claro
     creado = await _insertar_usuario(doc)
 
     if materias_ids:

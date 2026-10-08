@@ -131,7 +131,7 @@ Roles: `alumno`, `docente`, `coordinador`, `admin`. El admin pasa todas las vali
 |---|:-:|:-:|:-:|:-:|
 | Ver sus propias asistencias y materias (`/alumno/*`) | ✅ | — | — | — |
 | Listar / ver materias | ❌ | solo las que imparte | solo las de su cargo | todas |
-| Crear / editar materia | ❌ | ❌ | ✅ (editar: solo las suyas) | ✅ |
+| Crear / editar materia | ❌ | ❌ | ✅ (crear: solo para sus docentes; editar: solo las suyas) | ✅ |
 | Matricular / quitar alumnos de una materia | ❌ | solo en las suyas | solo en las suyas | ✅ |
 | Editar su nombre y correo, y cambiar su contraseña | ✅ | ✅ | ✅ | ✅ |
 | Editar carrera, facultad y estatus académico | ❌ | ❌ | los suyos y los de alumnos y docentes de su cargo | los de cualquiera |
@@ -390,6 +390,7 @@ Notas:
 
 - `area` solo admite `"civil"` o `"medicina"`, y **no se puede cambiar** después (tampoco `docente_id`).
 - Al crear, `coordinador_id` no se envía: el backend lo copia del docente elegido.
+- Un coordinador solo puede crear materias para docentes de su cargo. Para el selector de docente, `GET /usuarios?rol=docente` ya le devuelve solo los suyos. El admin puede elegir cualquiera.
 - `GET /materias` ya filtra por rol: el docente recibe las suyas (el query `docente_id` se ignora), el coordinador las de su cargo, el admin todas.
 - Matricular es por **código** del alumno; quitar es por **`_id`** del alumno.
 
@@ -398,6 +399,7 @@ Errores:
 - `422` — `"materia_id inválido"` / `"docente_id inválido"`.
 - `404` — `"La materia indicada no existe"`, `"El docente indicado no existe"`, `"No existe un alumno con ese código"`, `"Ese alumno no está matriculado en esta materia"`.
 - `403` — la materia no es tuya (docente que no la imparte, coordinador de otro cargo).
+- `403` — `"No puedes crear una materia para un docente fuera de tu cargo"` (POST, coordinador con un `docente_id` ajeno).
 - `409` — `"El alumno ya está matriculado en esta materia"`.
 - `400` — PATCH sin ningún campo.
 

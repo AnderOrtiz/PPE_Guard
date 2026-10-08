@@ -33,5 +33,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 480  # 8 horas, cubre una jornada de clases
 
+    # Clave Fernet con la que se cifran los rostros (face_embedding) en la base.
+    # Perderla o cambiarla obliga a registrar de nuevo el rostro de todos los alumnos.
+    FACE_EMBEDDING_KEY: str
+
 
 settings = Settings()

@@ -76,6 +76,9 @@ EXPRESS_DB_PORT=8181
 # Autenticación (JWT)
 JWT_SECRET_KEY=cambia-esto-por-algo-largo-y-aleatorio
 JWT_EXPIRE_MINUTES=480
+
+# Cifrado de los rostros registrados
+FACE_EMBEDDING_KEY=
 ```
 
 **Genera un valor real para `JWT_SECRET_KEY`** — no lo dejes con el texto de ejemplo:
@@ -85,6 +88,14 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Copia lo que imprima y pégalo como valor de `JWT_SECRET_KEY`.
+
+**Genera también `FACE_EMBEDDING_KEY`**, la clave con la que se cifran los rostros de los alumnos en la base:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Guarda una copia de esta clave en un lugar seguro. Si se pierde o se cambia, los rostros ya registrados no se pueden descifrar y hay que volver a registrar a todos los alumnos. Sin ella el backend no arranca.
 
 ---
 
@@ -125,7 +136,15 @@ Mongo Express queda disponible en `http://localhost:8181`.
 Con Mongo ya corriendo, y el entorno `yolo` activo:
 
 ```bash
-python -m scripts.seed_practices.py
+python -m scripts.inicializar
+```
+
+Crea lo mínimo para usar el sistema sobre una base vacía: un admin (`ADMIN001` / `cambiar123`) y el catálogo de PPE por área. Todo lo demás (coordinadores, docentes, materias, alumnos) se crea desde la API con ese admin. Para elegir las credenciales: `python -m scripts.inicializar <codigo> <contraseña> "<nombre>"`.
+
+Para un entorno de pruebas con usuarios de ejemplo de cada rol, en su lugar:
+
+```bash
+python -m scripts.seed_practices
 python -m scripts.seed_usuarios
 ```
 
