@@ -16,18 +16,64 @@ class CameraService:
         self._lock = threading.Lock()
         self._latest_frame = None
 
-    def start(self):
-        if self._running:
-            return  # ya está corriendo — evita abrir la cámara dos veces
+        # Quién está usando la cámara (una práctica, una vista previa...). El
+        # dispositivo se abre con el primero y se libera cuando no queda ninguno.
+        # RLock aparte del de frames: abrir y cerrar tarda, y no debe frenar las lecturas.
+        self._consumidores: set[str] = set()
+        self._consumidores_lock = threading.RLock()
 
-        self._cap = cv2.VideoCapture(self.camera_index)
-        if not self._cap.isOpened():
+    @property
+    def encendida(self) -> bool:
+        return self._running
+
+    def consumidores(self) -> set[str]:
+        with self._consumidores_lock:
+            return set(self._consumidores)
+
+    def adquirir(self, consumidor: str):
+        """Registra a un consumidor y enciende la cámara si era el primero.
+        Adquirir dos veces con el mismo nombre no cuenta doble. Si el dispositivo
+        no abre, lanza RuntimeError y el consumidor no queda registrado."""
+        with self._consumidores_lock:
+            if consumidor in self._consumidores:
+                return
+            if not self._consumidores:
+                self._abrir()
+            self._consumidores.add(consumidor)
+
+    def liberar(self, consumidor: str):
+        """Quita a un consumidor y apaga la cámara si era el último.
+        Liberar sin haber adquirido no hace nada."""
+        with self._consumidores_lock:
+            if consumidor not in self._consumidores:
+                return
+            self._consumidores.discard(consumidor)
+            if not self._consumidores:
+                self._cerrar()
+
+    def liberar_todos(self):
+        """Apaga la cámara sin importar quién la tenga. Solo para el apagado del servidor."""
+        with self._consumidores_lock:
+            self._consumidores.clear()
+            self._cerrar()
+
+    def _abrir(self):
+        cap = cv2.VideoCapture(self.camera_index)
+        if not cap.isOpened():
+            cap.release()
             raise RuntimeError(f"No se pudo abrir la cámara (índice {self.camera_index})")
 
         # Warm-up: descarta los primeros frames mientras la cámara ajusta exposición
         for _ in range(10):
-            self._cap.read()
+            cap.read()
 
+        # Deja un frame listo antes de volver, para que quien adquiere no vea la cámara vacía
+        ret, frame = cap.read()
+        if ret:
+            with self._lock:
+                self._latest_frame = self._resize(frame)
+
+        self._cap = cap
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
@@ -68,10 +114,11 @@ class CameraService:
                 return None
             return self._latest_frame.copy()
 
-    def stop(self):
+    def _cerrar(self):
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=2)
+            self._thread = None
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -86,11 +133,19 @@ def capture_single_frame(camera_index: int = 0, warmup_frames: int = 10):
     """Abre la cámara, descarta los primeros frames, captura uno solo, y la libera.
     Si el CameraService global ya está corriendo en el mismo índice, usa su
     último frame para evitar conflictos de acceso al dispositivo."""
-    if camera_service._running and camera_service.camera_index == camera_index:
-        frame = camera_service.get_latest_frame()
-        if frame is not None:
-            return frame
+    if camera_service.camera_index != camera_index:
+        return _capturar_directo(camera_index, warmup_frames)
 
+    # Con el candado de consumidores nadie enciende ni apaga la cámara a mitad de la captura
+    with camera_service._consumidores_lock:
+        if camera_service.encendida:
+            frame = camera_service.get_latest_frame()
+            if frame is not None:
+                return frame
+        return _capturar_directo(camera_index, warmup_frames)
+
+
+def _capturar_directo(camera_index: int, warmup_frames: int):
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
         raise RuntimeError(f"No se pudo abrir la cámara (índice {camera_index})")

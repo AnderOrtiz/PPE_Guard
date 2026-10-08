@@ -2,9 +2,9 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.database import get_database
-from app.core.security import verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token
 from app.api.v1.dependencies import get_current_user
-from app.models.usuario import UsuarioLogin, TokenResponse, UsuarioOut
+from app.models.usuario import UsuarioLogin, TokenResponse, UsuarioOut, PerfilUpdate, PasswordCambio
 
 router = APIRouter()
 
@@ -36,6 +36,36 @@ async def login(credentials: UsuarioLogin):
 @router.get("/auth/me", response_model=UsuarioOut)
 async def yo(user: dict = Depends(get_current_user)):
     return UsuarioOut(**await _usuario_del_token(user))
+
+
+@router.patch("/auth/me", response_model=UsuarioOut)
+async def actualizar_perfil(data: PerfilUpdate, user: dict = Depends(get_current_user)):
+    usuario = await _usuario_del_token(user)
+
+    cambios = data.model_dump(exclude_none=True)
+    if not cambios:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se envió ningún campo para actualizar")
+
+    database = get_database()
+    await database["usuarios"].update_one({"_id": usuario["_id"]}, {"$set": cambios})
+
+    actualizado = await database["usuarios"].find_one({"_id": usuario["_id"]})
+    return UsuarioOut(**actualizado)
+
+
+@router.post("/auth/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def cambiar_password(data: PasswordCambio, user: dict = Depends(get_current_user)):
+    usuario = await _usuario_del_token(user)
+
+    # Se pide la actual: un token robado o una sesión abierta no bastan para quedarse con la cuenta.
+    if not verify_password(data.password_actual, usuario["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La contraseña actual no es correcta")
+
+    database = get_database()
+    await database["usuarios"].update_one(
+        {"_id": usuario["_id"]},
+        {"$set": {"password_hash": hash_password(data.password_nueva)}},
+    )
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)

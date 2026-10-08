@@ -80,14 +80,31 @@ Authorization: Bearer <access_token>
 Devuelve el `UsuarioOut` del dueño del token (con su `_id`). Úsalo al cargar la app para validar el token guardado y obtener los datos del usuario; no hace falta decodificar el JWT.
 
 ```json
-{ "_id": "6abaac83f1b16007538b67e7", "codigo": "DOC001", "nombre": "Docente Demo", "rol": "docente", "carrera": null, "facultad": "Ingenieria", "coordinador_id": "6abaac82f1b16007538b67e5" }
+{ "_id": "6abaac83f1b16007538b67e7", "codigo": "DOC001", "nombre": "Docente Demo", "rol": "docente", "correo": null, "carrera": null, "estatus_academico": null, "facultad": "Ingenieria", "coordinador_id": "6abaac82f1b16007538b67e5" }
 ```
+
+### `PATCH /api/v1/auth/me` — cualquier usuario logueado
+
+Cada usuario edita su propio perfil. Body: cualquier combinación de `nombre`, `correo`, `carrera`, `facultad`, `estatus_academico` (solo los que cambian). Devuelve el `UsuarioOut` actualizado.
+
+- `codigo` y `rol` no se pueden cambiar: si se envían, se ignoran.
+- `400` — `"No se envió ningún campo para actualizar"`.
+- `422` — `correo` sin formato de correo o `nombre` vacío. Como en todo error de validación del body, `detail` llega como **array** de FastAPI, no como string.
+- Un campo en `null` se ignora: no se puede vaciar un dato ya guardado.
+- El `nombre` de `TokenResponse` es el del momento del login: tras editarlo, usar el del `UsuarioOut` devuelto.
+
+### `POST /api/v1/auth/me/password` — cualquier usuario logueado
+
+Cada usuario cambia su propia contraseña. Body: `{ "password_actual": "...", "password_nueva": "..." }`. Responde `204` sin cuerpo.
+
+- `403` — `"La contraseña actual no es correcta"`.
+- El token en uso sigue siendo válido: no hace falta volver a iniciar sesión.
 
 ### `POST /api/v1/auth/refresh` — cualquier usuario logueado
 
 Sin body. Con un token **todavía válido** devuelve un `TokenResponse` nuevo con otras 8 horas. Un token ya expirado no se puede renovar (`401`): hay que volver a iniciar sesión. Conviene llamarlo al cargar la app o cuando al token le quede poco (el `exp` del JWT está en segundos Unix).
 
-Ambos responden `401` si el usuario fue eliminado.
+Todos los de `/auth/me` y este responden `401` si el usuario fue eliminado.
 
 ### Usuarios de prueba (`python -m scripts.seed_usuarios`)
 
@@ -109,7 +126,10 @@ Roles: `alumno`, `docente`, `coordinador`, `admin`. El admin pasa todas las vali
 | Listar / ver materias | ❌ | solo las que imparte | solo las de su cargo | todas |
 | Crear / editar materia | ❌ | ❌ | ✅ (editar: solo las suyas) | ✅ |
 | Matricular / quitar alumnos de una materia | ❌ | solo en las suyas | solo en las suyas | ✅ |
+| Editar su propio perfil y cambiar su contraseña | ✅ | ✅ | ✅ | ✅ |
+| Resetear la contraseña de otro usuario | ❌ | ❌ | alumnos y docentes de su cargo | cualquiera |
 | Crear alumno (con captura facial) | ❌ | ✅ | ✅ | ✅ |
+| Encender / apagar la vista previa de la cámara | ❌ | ✅ | ✅ | ✅ |
 | Crear docente | ❌ | ❌ | ✅ | ✅ |
 | Crear coordinador | ❌ | ❌ | ❌ | ✅ |
 | Listar / ver usuarios | ❌ | alumnos de sus materias | sus docentes y alumnos de sus materias | todos |
@@ -142,9 +162,20 @@ export interface UsuarioOut {
   codigo: string;
   nombre: string;
   rol: Rol;
-  carrera: string | null;        // solo alumnos
-  facultad: string | null;       // alumnos y docentes
-  coordinador_id: string | null; // solo docentes
+  correo: string | null;            // null hasta que el usuario lo completa
+  carrera: string | null;
+  estatus_academico: string | null; // texto libre
+  facultad: string | null;
+  coordinador_id: string | null;    // solo docentes
+}
+
+// Body de PATCH /auth/me: solo los campos que cambian
+export interface PerfilUpdate {
+  nombre?: string;
+  correo?: string;
+  carrera?: string;
+  facultad?: string;
+  estatus_academico?: string;
 }
 
 export interface AlumnoEnMateriaOut {
@@ -281,6 +312,8 @@ Todas las rutas llevan el prefijo `/api/v1`. "Auth" indica qué rol exige el bac
 | Método | Ruta | Auth | Devuelve |
 |---|---|---|---|
 | GET | `/auth/me` | cualquier usuario logueado | `UsuarioOut` |
+| PATCH | `/auth/me` | cualquier usuario logueado | `UsuarioOut` (body: `PerfilUpdate`) |
+| POST | `/auth/me/password` | cualquier usuario logueado | `204` (body: `{ password_actual, password_nueva }`) |
 | POST | `/auth/refresh` | cualquier usuario logueado | `TokenResponse` |
 
 ### 6.3 Usuarios
@@ -288,8 +321,9 @@ Todas las rutas llevan el prefijo `/api/v1`. "Auth" indica qué rol exige el bac
 | Método | Ruta | Auth | Body | Devuelve |
 |---|---|---|---|---|
 | POST | `/usuarios/coordinadores` | admin | `{ codigo, password, nombre }` | `UsuarioOut` |
-| POST | `/usuarios/docentes` | coordinador | `{ codigo, password, nombre, facultad, coordinador_id }` | `UsuarioOut` |
-| POST | `/usuarios/alumnos` | coordinador, docente | `{ codigo, password, nombre, carrera, facultad }` | `UsuarioOut` |
+| POST | `/usuarios/docentes` | coordinador | `{ codigo, password, nombre, facultad }` (el admin agrega `coordinador_id`) | `UsuarioOut` |
+| POST | `/usuarios/alumnos` | coordinador, docente | `{ codigo, password, nombre, materias_ids? }` | `UsuarioOut` |
+| POST | `/usuarios/{usuario_id}/password` | coordinador | `{ password_nueva }` | `204` sin cuerpo. Resetea la contraseña de otro usuario |
 | GET | `/usuarios?rol=` | coordinador, docente | query opcional `rol`: `alumno` \| `docente` \| `coordinador` | `UsuarioOut[]`. El coordinador ve sus docentes y los alumnos de sus materias; el docente, los alumnos de sus materias; el admin, todos |
 | GET | `/usuarios/{usuario_id}` | coordinador, docente | — | `UsuarioOut`. Misma visibilidad que el listado (más uno mismo); fuera de ella responde `403` |
 
@@ -297,17 +331,31 @@ Errores:
 
 - `409` — `"Ya existe un usuario con ese código"` (los tres POST).
 - `422` — `"coordinador_id inválido"` / `"usuario_id inválido"` (no es un ObjectId).
+- `422` — `"Indica el coordinador a cargo del docente (coordinador_id)"` (un admin creó un docente sin `coordinador_id`).
 - `404` — `"El coordinador indicado no existe"` / `"El usuario indicado no existe"`.
 
 **Crear alumno captura el rostro en ese momento con la cámara del servidor.** Consecuencias para la UI:
 
 - Antes de enviar, mostrar las indicaciones ("mira a la cámara", "quédate quieto", "solo una persona en cuadro").
+- Para que el coordinador vea el encuadre antes de capturar, encender la vista previa de la cámara (sección 6.9). Con ella encendida, el frame que se guarda es el mismo que se ve en pantalla.
 - La petición tarda varios segundos (abrir cámara + calcular el vector facial). Mostrar estado de carga y deshabilitar el botón.
 - `422` — `"No se detectó exactamente un rostro. Asegúrate de que solo una persona esté frente a la cámara."` → permitir reintentar sin perder el formulario.
 - `500` si el servidor no puede abrir la cámara.
 - El rostro se registra una sola vez; luego el alumno se matricula en las materias por su código.
 
-Al crear un docente, un coordinador debe mandar su propio id en `coordinador_id` (el `_id` de `GET /auth/me`). El admin elige el coordinador con `GET /usuarios?rol=coordinador`.
+**Crear docente.** Un coordinador solo manda `codigo`, `password`, `nombre` y `facultad`: el docente queda a su cargo (si envía `coordinador_id`, se ignora). El admin sí debe mandar `coordinador_id`, elegido con `GET /usuarios?rol=coordinador`.
+
+**Crear alumno.** Solo se piden `codigo`, `password` y `nombre`; el resto del perfil (`correo`, `carrera`, `facultad`, `estatus_academico`) lo completa el alumno después con `PATCH /auth/me`. `carrera` y `facultad` se siguen aceptando en el body si se quieren mandar.
+
+- `materias_ids` (opcional) matricula al alumno en esas materias al crearlo. Para el selector: `GET /materias` ya devuelve solo las del coordinador (o las que imparte el docente).
+- Se valida **antes** de la captura facial: `422` — `"materias_ids contiene un id inválido"`; `404` — `"Alguna de las materias indicadas no existe"`; `403` — `"No puedes matricular alumnos en una materia fuera de tu cargo"` / `"...que no impartes"`. Si una falla, no se crea el alumno.
+- Conviene matricularlo en al menos una: un alumno sin materias solo lo ve el admin, y su coordinador no podría resetearle la contraseña.
+
+**Resetear contraseña** (`POST /usuarios/{usuario_id}/password`). No pide la contraseña anterior.
+
+- Coordinador: solo alumnos y docentes de su cargo (la misma visibilidad de `GET /usuarios`). `403` — `"Solo puedes resetear la contraseña de alumnos y docentes"` / `"No puedes resetear la contraseña de un usuario fuera de tu cargo"`.
+- Admin: cualquier usuario, incluidos los coordinadores.
+- Docente y alumno: `403`. `404` — `"El usuario indicado no existe"`.
 
 ### 6.4 Materias
 
@@ -412,6 +460,73 @@ export interface ResumenCoordinacion {
 ```
 
 El coordinador recibe solo lo de su cargo; el admin, los totales del sistema (y en `alumnos`, todos los registrados, estén o no matriculados).
+
+### 6.9 Cámara — vista previa para el enrolamiento
+
+Sin una práctica activa la cámara del servidor está apagada. Estos endpoints la encienden mientras el usuario está en la pantalla de alta de alumno, para mostrar el mismo stream de la sección 8 y encuadrar antes de capturar.
+
+| Método | Ruta | Auth | Body | Devuelve |
+|---|---|---|---|---|
+| POST | `/camara/vista-previa` | coordinador, docente | — | `VistaPreviaEstado`. Enciende la vista previa de quien llama |
+| DELETE | `/camara/vista-previa` | coordinador, docente | — | `VistaPreviaEstado`. La apaga |
+| GET | `/camara/vista-previa` | coordinador, docente | — | `VistaPreviaEstado`. Solo consulta |
+
+Las tres van con `fetch` y el header `Authorization: Bearer` normal (no `?token=`).
+
+```ts
+type VistaPreviaEstado = {
+  activa: boolean;            // la vista previa de ESTE usuario
+  camara_encendida: boolean;  // puede seguir en true con activa=false: la usa una práctica u otro usuario
+  gracia_segundos: number;    // cuánto aguanta sin que se lea el stream antes de apagarse sola (10)
+};
+```
+
+Errores:
+
+- `401` — sin token o token inválido. `403` — rol alumno.
+- `503` (solo POST) — `"No se pudo abrir la cámara del servidor. Verifica que esté conectada y que no la esté usando otra aplicación."` La vista previa no queda encendida; se puede reintentar.
+
+Comportamiento:
+
+- **El POST tarda 1–2 s** si tiene que abrir la cámara (responde cuando ya hay imagen). Si la cámara ya estaba encendida por una práctica, responde al instante.
+- **Hay una vista previa por usuario, no por pestaña.** Encenderla dos veces no cuenta doble: un solo DELETE la apaga. Apagarla sin haberla encendido responde `200` igual.
+- **No interfiere con la práctica.** Encenderla o apagarla durante una práctica no toca la detección; y si una práctica termina con la vista previa encendida, el stream sigue.
+- **Se apaga sola** si pasan `gracia_segundos` sin que este usuario reciba frames de `GET /stream` (pestaña cerrada, corte de red, `<img>` nunca montado). Mientras el `<img>` esté montado y cargando, se mantiene; no hay que renovar nada.
+- Si se apagó sola (por ejemplo, el equipo se suspendió), el `<img>` queda congelado en el último frame: volver a hacer POST y remontar el `<img>`.
+
+Flujo de la pantalla de alta de alumno:
+
+```tsx
+function VistaPreviaCamara() {
+  const { token } = useAuth();
+  const [lista, setLista] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let vigente = true;
+    api("/api/v1/camara/vista-previa", { method: "POST" })
+      .then(() => vigente && setLista(true))
+      .catch((e) => vigente && setError(e.message));   // 503: mostrar el detail y un botón Reintentar
+
+    return () => {
+      vigente = false;
+      // keepalive: la petición sale aunque la página se esté cerrando
+      fetch(`${import.meta.env.VITE_API_URL}/api/v1/camara/vista-previa`, {
+        method: "DELETE", keepalive: true, headers: { Authorization: `Bearer ${token}` },
+      });
+    };
+  }, [token]);
+
+  if (error) return <p>{error}</p>;
+  if (!lista) return <p>Encendiendo la cámara…</p>;
+  // Montar el <img> solo DESPUÉS de que el POST respondió: antes, /stream responde 409
+  return <img src={`${import.meta.env.VITE_API_URL}/api/v1/stream?token=${token}`} alt="Vista previa" />;
+}
+```
+
+1. Al entrar: `POST /camara/vista-previa` → montar el `<img>` del stream.
+2. Enviar el formulario → `POST /usuarios/alumnos` (sin cambios). Con `422`, la vista previa sigue encendida: reintentar sin más.
+3. Al salir de la pantalla: desmontar el `<img>` y `DELETE /camara/vista-previa`. Si el DELETE no llega a salir, el servidor la apaga solo a los 10 s.
 
 ---
 
@@ -587,7 +702,8 @@ Para probar el socket sin frontend: `python -m scripts.test_ws_client <access_to
 
 - Es MJPEG (`multipart/x-mixed-replace`), a unos 8 fps. Va en un `<img>`, no en `<video>`.
 - Pide el token como query `token` (docente, coordinador, admin). Sin token `401`; rol alumno `403`. El `<img>` no muestra el error: solo queda roto.
-- **Solo hay imagen mientras hay una práctica activa.** Sin práctica, la petición queda abierta sin enviar nada. Monta el `<img>` únicamente cuando haya práctica y desmóntalo al finalizar (para cerrar la conexión).
+- **Solo hay imagen con la cámara encendida:** durante una práctica activa o con la vista previa de enrolamiento (sección 6.9). Con la cámara apagada responde `409` — `"La cámara está apagada: no hay una práctica activa ni una vista previa encendida"` — y el `<img>` dispara `onError`. Monta el `<img>` únicamente después de que `POST /practicas` o `POST /camara/vista-previa` hayan respondido, y desmóntalo al terminar (para cerrar la conexión).
+- **Si la cámara se apaga a mitad del stream, el servidor cierra la respuesta.** El `<img>` no avisa: se queda con el último frame. Como el frontend es quien finaliza la práctica o apaga la vista previa, basta con desmontarlo en ese momento.
 - El video llega limpio, sin cajas dibujadas. Las cajas se pintan en el frontend con `detecciones_frame`.
 
 ### Overlay de cajas
@@ -716,7 +832,8 @@ Los mensajes de `detail` ya vienen en español y redactados para el usuario: se 
 | `/materias` | docente, coordinador, admin | Lista de materias | `GET /materias` |
 | `/materias/nueva` | coordinador, admin | Crear materia | `POST /materias` |
 | `/materias/:id` | docente, coordinador, admin | Detalle, alumnos matriculados, matricular por código, quitar, editar | `GET /materias/{id}`, `GET/POST/DELETE .../alumnos`, `PATCH /materias/{id}` |
-| `/usuarios/nuevo` | según tabla de permisos | Alta de alumno (con captura facial), docente o coordinador | `POST /usuarios/*`, `GET /usuarios?rol=` |
+| `/perfil` | todos | Ver y editar los datos propios; cambiar la contraseña | `GET/PATCH /auth/me`, `POST /auth/me/password` |
+| `/usuarios/nuevo` | según tabla de permisos | Alta de alumno (con vista previa de la cámara y captura facial), docente o coordinador | `POST /usuarios/*`, `GET /usuarios?rol=`, `GET /materias` (para `materias_ids`), `POST/DELETE /camara/vista-previa`, stream |
 | `/practica` | docente, admin | Sesión en vivo: video, overlay, tarjeta del identificado, Confirmar, Finalizar | `POST /practicas`, `GET /practicas/active`, `.../confirmar`, `.../end`, WebSocket, stream |
 | `/asistencias` | docente, coordinador, admin | Historial con filtros | `GET /asistencias` |
 | `/materias/:id/practicas` | docente, coordinador, admin | Prácticas pasadas de la materia, con enlace a su reporte | `GET /practicas?materia_id=` |

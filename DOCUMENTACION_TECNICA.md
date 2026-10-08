@@ -115,7 +115,18 @@ $2b$12$N9qo8uLOickgx2ZMRZoMye.IjZAgcfl7p92ldGxad68LJZdL17lhW
 - El costo es el que trae la librería por defecto (12). No está parametrizado en `config.py`.
 - bcrypt solo considera los primeros **72 bytes** de la contraseña.
 - `password_hash` y `face_embedding` nunca salen de la API: el modelo `UsuarioOut` no los incluye.
-- No existe todavía un endpoint para cambiar la contraseña.
+
+### Cambio y reseteo
+
+| Caso | Endpoint | Quién | Pide la contraseña actual |
+|---|---|---|---|
+| Cambiar la propia | `POST /auth/me/password` | Cualquier usuario | Sí |
+| Resetear la de otro | `POST /usuarios/{id}/password` | Coordinador (alumnos y docentes de su cargo) y admin (cualquiera) | No |
+
+- El cambio propio exige la contraseña actual para que una sesión abierta o un token robado no basten para quedarse con la cuenta.
+- El reseteo del coordinador usa la misma regla de "solo lo mío" que el listado de usuarios (sección 5). Por eso no puede resetear a un alumno que no esté matriculado en ninguna de sus materias.
+- **Los tokens ya emitidos siguen valiendo** tras un cambio o reseteo, hasta que expiran (sección 4, "Sin estado").
+- No hay regla de longitud o complejidad: solo se rechaza la contraseña vacía, igual que al crear usuarios.
 
 ---
 
@@ -187,7 +198,15 @@ Además del rol, casi todos los endpoints filtran por pertenencia. La regla se r
 | admin | Todo |
 | alumno | Sus propias asistencias, materias y fotos de evidencia |
 
-Un detalle importante: **los alumnos no tienen dueño propio**. Su visibilidad se deduce de `alumnos_ids` de las materias. Un alumno recién creado que no está matriculado en ninguna materia solo lo ve el admin.
+Un detalle importante: **los alumnos no tienen dueño propio**. Su visibilidad se deduce de `alumnos_ids` de las materias. Un alumno recién creado que no está matriculado en ninguna materia solo lo ve el admin. Para evitarlo, `POST /usuarios/alumnos` acepta `materias_ids` y lo matricula en el mismo paso, con las mismas reglas que la matrícula normal.
+
+### Perfil
+
+Todo usuario tiene los mismos datos de perfil: `codigo`, `nombre`, `correo`, `carrera`, `estatus_academico` y `facultad`. Al crear un usuario solo se pide lo mínimo (alumno: código, nombre y contraseña; docente: además la facultad); el resto queda vacío y **lo completa el propio usuario** con `PATCH /auth/me`.
+
+- `codigo` y `rol` no son editables: el código es la credencial de acceso y el rol define los permisos.
+- Nadie edita el perfil de otro usuario; no hay endpoint para eso.
+- `estatus_academico` es texto libre y lo edita el propio usuario, como el resto.
 
 ---
 
@@ -201,7 +220,7 @@ Código: `app/services/camera_service.py`.
 
 ### Cómo captura
 
-1. `start()` abre la cámara con OpenCV (`cv2.VideoCapture`).
+1. Al llegar el primer consumidor (ver "Uso compartido"), se abre la cámara con OpenCV (`cv2.VideoCapture`).
 2. Descarta los primeros 10 frames (*warm-up*): la cámara necesita un momento para ajustar la exposición, y esos frames salen oscuros.
 3. Lanza un **hilo propio** que lee frames en bucle a 8 por segundo.
 4. Cada frame se reduce a 640 px de ancho y se guarda como "el último frame".
@@ -219,14 +238,53 @@ El acceso está protegido con un `Lock`, porque el hilo de captura escribe el fr
 | Consumidor | Cuándo |
 |---|---|
 | Orquestador de la práctica | Durante toda la práctica (rostro y prendas) |
-| `GET /stream` | Para mandar el video al navegador |
+| Vista previa de enrolamiento | Mientras alguien está en la pantalla de alta de alumno |
+| `GET /stream` | Para mandar el video al navegador. Solo lee: no enciende ni apaga la cámara |
 | `POST /usuarios/alumnos` | Una sola foto, para registrar el rostro |
 
-El registro de un alumno usa `capture_single_frame()`: si la cámara ya está encendida por una práctica, toma el último frame; si no, la abre, captura una foto y la cierra.
+El registro de un alumno usa `capture_single_frame()`: si la cámara ya está encendida (por una práctica o por la vista previa), toma el último frame; si no, la abre, captura una foto y la cierra. Con la vista previa encendida, la foto que se guarda es la misma imagen que el coordinador ve en pantalla.
+
+### Uso compartido
+
+La práctica y la vista previa pueden coincidir, y ninguna debe apagarle la cámara a la otra. `CameraService` lleva un **registro de consumidores por nombre**:
+
+- `adquirir(nombre)` anota al consumidor. Si es el primero, abre el dispositivo.
+- `liberar(nombre)` lo quita. Si era el último, cierra el dispositivo.
+
+| Consumidor | Nombre |
+|---|---|
+| Orquestador de una práctica | `practica:<practica_id>` |
+| Vista previa de un usuario | `vista_previa:<user_id>` |
+
+Reglas:
+
+- **Idempotente.** Adquirir dos veces con el mismo nombre no cuenta doble; liberar un nombre que no está registrado no hace nada.
+- **Si la cámara no abre, `adquirir` lanza `RuntimeError` y el consumidor no queda registrado.**
+- **Seguro entre hilos.** Un candado (`_consumidores_lock`) serializa adquirir, liberar y la captura única del alta de alumno. Es distinto del candado de frames, para que abrir el dispositivo (lento) no frene las lecturas.
+- `liberar_todos()` cierra la cámara sin importar quién la tenga. Solo se usa al apagar el servidor.
+
+Esta lógica tiene pruebas que no necesitan cámara real (`tests/test_camara_compartida.py`): `python -m unittest discover -s tests -t .`
+
+### Vista previa para el enrolamiento
+
+Código: `app/services/vista_previa.py` y `app/api/v1/endpoints/camara.py`.
+
+Al dar de alta un alumno no hay práctica, así que la cámara estaría apagada y se capturaría a ciegas. `POST /api/v1/camara/vista-previa` la enciende y `DELETE` la apaga (coordinador y docente; contrato en `FRONTEND.md`, sección 6.9). Hay una vista previa **por usuario**: encenderla dos veces no cuenta doble.
+
+Si la cámara no abre, el POST responde `503` con un mensaje para el usuario y no queda nada encendido.
+
+**Salvaguarda contra vistas previas huérfanas.** Si el navegador se cierra sin avisar, nadie llamaría al DELETE y la cámara quedaría encendida. Para evitarlo, una vista previa se apaga sola cuando su dueño pasa 10 segundos (`GRACIA_SIN_LECTURA_SEGUNDOS`) sin recibir frames de `/stream`:
+
+- `/stream` anota una lectura cada vez que entrega un frame a ese usuario.
+- Una tarea vigilante revisa cada segundo y libera las vistas previas caducadas.
+
+Se eligió esto, y no un tiempo de vida que el cliente renueva, porque no le pide nada al frontend: tener el `<img>` montado ya es la señal de vida. Cubre la pestaña cerrada, el `<img>` que nunca se montó y el corte de red (un lector colgado deja de recibir frames, así que deja de contar). El vigilante solo libera el consumidor de la vista previa: nunca apaga la cámara de una práctica.
+
+Efecto a tener presente: como la lectura se cuenta por usuario, si el mismo usuario tiene el stream abierto en otra pestaña, la vista previa sigue viva mientras esa pestaña lo lea.
 
 ### Cuándo está encendida
 
-Solo mientras hay una práctica activa. Se enciende al iniciarla y se apaga al finalizarla. Sin práctica, `/stream` queda abierto sin enviar nada.
+Mientras tenga al menos un consumidor: una práctica activa o una vista previa. Con la cámara apagada, `/stream` responde `409` en vez de quedarse abierto sin enviar nada.
 
 ---
 
@@ -499,6 +557,10 @@ Al reanudar se pierde el estado de la revisión en curso: la práctica vuelve a 
 
 Al detener el servidor se paran los orquestadores y se libera la cámara, pero **la práctica se deja "activa" en Mongo**, justamente para poder reanudarla al volver.
 
+La cámara se libera aunque haya quedado una vista previa encendida (`camera_service.liberar_todos()`).
+
+Un detalle de uvicorn: antes de correr el apagado espera a que cierren las conexiones abiertas, y un stream MJPEG no cierra nunca por sí solo. Por eso `app/core/apagado.py` anota la señal de apagado (SIGINT/SIGTERM) y `/stream` corta al verla. Sin esto, un navegador con el video abierto dejaría al servidor colgado en "Waiting for connections to close", con la cámara tomada.
+
 ### Práctica por docente
 
 Aunque solo hay una práctica en todo el servidor, cada docente solo ve y controla la suya:
@@ -557,6 +619,7 @@ Formato **MJPEG**: una sucesión de imágenes JPEG sobre una conexión HTTP que 
 
 - Es simple y no requiere nada especial en el navegador. A cambio, consume más ancho de banda que un video comprimido.
 - El video llega **limpio**, sin cajas. Las cajas las dibuja el frontend con las coordenadas de `detecciones_frame`, que vienen normalizadas entre 0 y 1.
+- El stream solo lee el último frame; no enciende la cámara. Si está apagada al pedirlo, responde `409`. Si se apaga a mitad (terminó la práctica o la vista previa), si pasa 5 segundos encendida sin entregar imagen, o si el servidor se está apagando, la respuesta se cierra.
 
 ### Evidencias (`/static/evidence/...`)
 
@@ -574,7 +637,7 @@ MongoDB, con el driver asíncrono de `pymongo`.
 
 | Colección | Qué guarda | Campos clave |
 |---|---|---|
-| `usuarios` | Todos los roles | `codigo` (único), `rol`, `password_hash`, `face_embedding` (alumnos), `coordinador_id` (docentes) |
+| `usuarios` | Todos los roles | `codigo` (único), `rol`, `password_hash`, `face_embedding` (alumnos), `coordinador_id` (docentes), perfil: `nombre`, `correo`, `carrera`, `estatus_academico`, `facultad` |
 | `materias` | Las materias | `area`, `docente_id`, `coordinador_id`, `alumnos_ids` |
 | `practices` | Catálogo de PPE por área | `area`, `ppe_requerido` |
 | `practicas` | Las sesiones de práctica | `materia_id`, `docente_id`, `hora_inicio`, `hora_fin`, `estado` |
@@ -658,6 +721,8 @@ Con `0.10`, una persona cuya caja mide 200 × 400 px se evalúa con una zona de 
 | Parámetro | Archivo | Valor | Qué controla |
 |---|---|---|---|
 | `STREAM_INTERVAL_SECONDS` | `endpoints/stream.py` | 1/8 | Ritmo del video; debe coincidir con `target_fps` |
+| `SIN_FRAMES_MAX_SEGUNDOS` | `endpoints/stream.py` | 5 | Cuánto espera el stream a una cámara encendida que no entrega imagen antes de cortar |
+| `GRACIA_SIN_LECTURA_SEGUNDOS` | `services/vista_previa.py` | 10 | Cuánto aguanta una vista previa sin que se lea el stream antes de apagarse sola. Subirlo si la red es lenta y se apaga antes de que cargue el `<img>` |
 | `DIAS_RECIENTE` | `endpoints/coordinacion.py` | 7 | Ventana de "materia nueva" y "laboratorio activo" en el panel del coordinador |
 | `EVIDENCE_DIR` | `services/evidence_service.py` | `static/evidence` | Dónde se guardan las fotos |
 

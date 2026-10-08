@@ -7,11 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.core import async_bridge
+from app.core import async_bridge, apagado
 from app.api.v1.router import api_router
 from app.api.v1.endpoints.evidencias import router as evidencias_router
 from app.services.practica_lifecycle import recuperar_practica_activa
-from app.services import practica_registry
+from app.services import practica_registry, vista_previa
+from app.services.camera_service import camera_service
 from app.websockets.router import router as ws_router
 
 os.makedirs("static/evidence", exist_ok=True)
@@ -21,10 +22,14 @@ os.makedirs("static/evidence", exist_ok=True)
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
     async_bridge.set_main_loop(asyncio.get_running_loop())
+    apagado.vigilar_senales()
     await recuperar_practica_activa()
     yield
     # Se apaga la cámara, pero la práctica sigue "activa" en la base para reanudarla al volver.
     practica_registry.detener_todos()
+    # Una vista previa de enrolamiento que quedó abierta no debe retener el dispositivo.
+    vista_previa.detener()
+    camera_service.liberar_todos()
     await close_mongo_connection()
 
 

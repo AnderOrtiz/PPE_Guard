@@ -1,7 +1,7 @@
 import time
 from app.services.camera_service import camera_service
 
-camera_service.start()
+camera_service.adquirir("script")
 
 time.sleep(1)  # dale tiempo al hilo de capturar al menos un par de frames
 
@@ -11,6 +11,6 @@ if frame is None:
 else:
     print("Frame shape:", frame.shape)
 
-camera_service.stop()
+camera_service.liberar("script")
 
 # python -m scripts.test_camera_service

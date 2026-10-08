@@ -25,6 +25,7 @@ class PracticaOrchestrator:
 
         self._running = False
         self._thread: threading.Thread | None = None
+        self._consumidor = f"practica:{practica_id}"  # nombre con el que usa la cámara compartida
         self._fase = "identificacion"  # "identificacion" | "indumentaria"
 
         self._last_identified_id: str | None = None
@@ -40,7 +41,7 @@ class PracticaOrchestrator:
     def start(self):
         if self._running:
             return
-        camera_service.start()
+        camera_service.adquirir(self._consumidor)
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -203,4 +204,5 @@ class PracticaOrchestrator:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=2)
-        camera_service.stop()
+        # Se apaga solo si nadie más la usa (p. ej. una vista previa de enrolamiento)
+        camera_service.liberar(self._consumidor)

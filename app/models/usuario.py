@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from app.models.common import PyObjectId
 
 
@@ -37,12 +37,32 @@ class CoordinadorCreate(_UsuarioBaseCreate):
 
 class DocenteCreate(_UsuarioBaseCreate):
     facultad: str
-    coordinador_id: str
+    coordinador_id: str | None = None  # solo lo manda el admin; un coordinador crea docentes a su cargo
 
 
 class AlumnoCreate(_UsuarioBaseCreate):
-    carrera: str
-    facultad: str
+    # El resto del perfil lo completa el propio alumno después (PATCH /auth/me)
+    carrera: str | None = None
+    facultad: str | None = None
+    materias_ids: list[str] = []  # materias en las que queda matriculado al crearlo
+
+
+class PerfilUpdate(BaseModel):
+    """Lo que cada usuario puede cambiar de sí mismo. El código y el rol no se tocan."""
+    nombre: str | None = Field(default=None, min_length=1)
+    correo: EmailStr | None = None
+    carrera: str | None = None
+    facultad: str | None = None
+    estatus_academico: str | None = None
+
+
+class PasswordCambio(BaseModel):
+    password_actual: str
+    password_nueva: str = Field(min_length=1)
+
+
+class PasswordReset(BaseModel):
+    password_nueva: str = Field(min_length=1)
 
 
 class UsuarioOut(BaseModel):
@@ -51,7 +71,9 @@ class UsuarioOut(BaseModel):
     codigo: str
     nombre: str
     rol: str
+    correo: str | None = None
     carrera: str | None = None
+    estatus_academico: str | None = None
     facultad: str | None = None
     coordinador_id: str | None = None
 
