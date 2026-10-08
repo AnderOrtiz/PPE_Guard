@@ -123,7 +123,7 @@ Administra una parte del sistema: sus docentes, sus materias y los alumnos de es
 - **Es el único** que crea coordinadores, y el único que puede resetear la contraseña de un coordinador.
 - **Puede iniciar prácticas** de cualquier materia. La práctica queda a nombre del docente de la materia, no del admin.
 - **No tiene** pantallas de alumno: no tiene asistencias ni materias propias.
-- **Cómo nace:** no hay endpoint para crear admins. El primero sale del script `python -m scripts.inicializar`.
+- **Cómo nace:** no hay endpoint para crear admins. El primero sale del script `python -m scripts.seed_inicializar`.
 
 ---
 

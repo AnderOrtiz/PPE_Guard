@@ -69,7 +69,7 @@ Hay dos modelos de inteligencia artificial, con trabajos distintos:
 | `app/models/` | Esquemas Pydantic: qué entra y qué sale de la API |
 | `app/services/` | La lógica: cámara, rostro, YOLO, revisión de prendas, orquestador, evidencias |
 | `app/websockets/` | Conexiones WebSocket y difusión de eventos |
-| `scripts/` | Seeds y scripts de prueba manual |
+| `scripts/` | `seed_inicializar`: el admin y el catálogo de PPE para una base vacía |
 | `weights/` | Pesos de los modelos YOLO (`.pt`) |
 | `static/evidence/` | Fotos de evidencia generadas en ejecución |
 
@@ -341,7 +341,7 @@ Cómo funciona:
 - Con una clave equivocada, iniciar una práctica responde `500` con un mensaje que lo indica, y la práctica no queda creada.
 - Protege de quien acceda a la base, no de quien acceda al servidor: la clave está en el mismo equipo, en `.env`. No debe subirse al repositorio ni guardarse junto a los respaldos de Mongo.
 
-**Alumnos registrados antes del cifrado.** Sus vectores quedaron en claro (una lista de números). El sistema los sigue leyendo, y se cifran con `python -m scripts.cifrar_embeddings` (se puede correr varias veces; no toca los ya cifrados).
+**Alumnos registrados antes del cifrado.** Si la base conserva alguno, su vector está en claro (una lista de números). El sistema lo sigue leyendo, pero no lo cifra solo: hay que volver a registrar a ese alumno.
 
 ### Identificación (durante la práctica)
 
@@ -801,7 +801,7 @@ Con `0.10`, una persona cuya caja mide 200 × 400 px se evalúa con una zona de 
 
 ### De mantenimiento
 
-- **No hay pruebas automatizadas.** Los archivos de `scripts/` son pruebas manuales.
+- **Pocas pruebas automatizadas.** `tests/` cubre el uso compartido de la cámara y el cifrado de rostros (`python -m unittest discover -s tests -t .`); los endpoints no tienen pruebas.
 - **Los errores se imprimen en consola** con `print`; no hay sistema de logs.
 - **El estado de la práctica vive en la memoria de un proceso.** El servidor debe correr con **un solo worker**: con varios, cada uno tendría su propio registro de prácticas y su propia cámara.
 

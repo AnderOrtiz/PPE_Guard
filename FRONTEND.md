@@ -113,13 +113,13 @@ Sin body. Con un token **todavía válido** devuelve un `TokenResponse` nuevo co
 
 Todos los de `/auth/me` y este responden `401` si el usuario fue eliminado.
 
-### Usuarios de prueba (`python -m scripts.seed_usuarios`)
+### Usuario inicial (`python -m scripts.seed_inicializar`)
 
 | Código | Contraseña | Rol |
 |---|---|---|
 | `ADMIN001` | `cambiar123` | admin |
-| `COORD001` | `cambiar123` | coordinador |
-| `DOC001` | `cambiar123` | docente |
+
+Una base recién inicializada solo tiene este admin (y el catálogo de PPE). Los coordinadores, docentes, materias y alumnos se crean desde la API con él.
 
 ---
 
@@ -707,7 +707,7 @@ export function useDetectionsSocket(onEvento: (e: EventoWS) => void, activo = tr
 - La función de limpieza es obligatoria: en desarrollo, `StrictMode` monta el efecto dos veces y sin ella quedan dos conexiones (eventos duplicados).
 - `detecciones_frame` llega unas 3 veces por segundo. Guarda las detecciones en un `ref` y dibuja en un `<canvas>`, o al menos aíslalas en un componente propio, para no re-renderizar toda la pantalla.
 
-Para probar el socket sin frontend: `python -m scripts.test_ws_client <access_token>`.
+Para probar el socket sin frontend sirve cualquier cliente WebSocket (por ejemplo `websocat "ws://localhost:8000/ws/detections?token=<access_token>"`).
 
 ---
 
@@ -887,13 +887,13 @@ Para mostrar el nombre de la materia y el PPE requerido en esta pantalla: `GET /
 
 ```bash
 docker compose up -d                 # MongoDB
-python -m scripts.seed_practices     # catálogo de PPE
-python -m scripts.seed_usuarios      # ADMIN001, COORD001, DOC001
+python -m scripts.seed_inicializar   # admin ADMIN001 y catálogo de PPE
 uvicorn app.main:app --reload        # http://localhost:8000
 ```
 
 Detalle completo de instalación en `readme.md`. Para una primera prueba de punta a punta:
 
-1. Login como `COORD001` → crear una materia de área `civil` con el `_id` de `DOC001` como `docente_id`.
-2. Crear un alumno (frente a la cámara del servidor) y matricularlo en la materia por su código.
-3. Login como `DOC001` → iniciar la práctica de esa materia y seguir el flujo de la sección 10.
+1. Login como `ADMIN001` → crear un coordinador, y un docente a cargo de ese coordinador.
+2. Crear una materia de área `civil` con el `_id` del docente como `docente_id`.
+3. Crear un alumno (frente a la cámara del servidor) y matricularlo en la materia.
+4. Login como el docente → iniciar la práctica de esa materia y seguir el flujo de la sección 10.

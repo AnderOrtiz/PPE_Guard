@@ -57,5 +57,5 @@ if __name__ == "__main__":
     asyncio.run(inicializar(codigo, password, nombre))
 
 
-# python -m scripts.inicializar
-# python -m scripts.inicializar <codigo> <contraseña> "<nombre>"
+# python -m scripts.seed_inicializar
+# python -m scripts.seed_inicializar <codigo> <contraseña> "<nombre>"

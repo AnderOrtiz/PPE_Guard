@@ -136,27 +136,12 @@ Mongo Express queda disponible en `http://localhost:8181`.
 Con Mongo ya corriendo, y el entorno `yolo` activo:
 
 ```bash
-python -m scripts.inicializar
+python -m scripts.seed_inicializar
 ```
 
-Crea lo mínimo para usar el sistema sobre una base vacía: un admin (`ADMIN001` / `cambiar123`) y el catálogo de PPE por área. Todo lo demás (coordinadores, docentes, materias, alumnos) se crea desde la API con ese admin. Para elegir las credenciales: `python -m scripts.inicializar <codigo> <contraseña> "<nombre>"`.
+Crea lo mínimo para usar el sistema sobre una base vacía: un admin (`ADMIN001` / `cambiar123`) y el catálogo de PPE por área. Todo lo demás (coordinadores, docentes, materias, alumnos) se crea desde la API con ese admin. Para elegir las credenciales: `python -m scripts.seed_inicializar <codigo> <contraseña> "<nombre>"`.
 
-Para un entorno de pruebas con usuarios de ejemplo de cada rol, en su lugar:
-
-```bash
-python -m scripts.seed_practices
-python -m scripts.seed_usuarios
-```
-
-El primero crea el catálogo de PPE por área (civil/medicina). El segundo crea usuarios de prueba:
-
-| Código | Contraseña | Rol |
-|---|---|---|
-| `ADMIN001` | `cambiar123` | admin |
-| `COORD001` | `cambiar123` | coordinador |
-| `DOC001` | `cambiar123` | docente |
-
-Cambia estas contraseñas antes de usar el sistema fuera de un entorno de pruebas.
+Cambia la contraseña del admin al entrar (`POST /api/v1/auth/me/password`) antes de usar el sistema fuera de un entorno de pruebas.
 
 ---
 
@@ -174,7 +159,7 @@ El servidor queda disponible en `http://127.0.0.1:8000`.
 
 - **Documentación interactiva:** `http://127.0.0.1:8000/docs`
 - **Salud del backend + Mongo:** `GET /api/v1/health` → `{"status": "ok", "mongo": "connected"}`
-- **Login de prueba:** `POST /api/v1/auth/login` con `{"codigo": "DOC001", "password": "cambiar123"}` → debe devolver un `access_token`
+- **Login de prueba:** `POST /api/v1/auth/login` con `{"codigo": "ADMIN001", "password": "cambiar123"}` → debe devolver un `access_token`
 - **Video en vivo:** con una práctica activa, abre `http://127.0.0.1:8000/api/v1/stream?token=<access_token>` en el navegador (token de docente, coordinador o admin) — deberías ver el feed de la cámara
 
 ---
@@ -192,7 +177,7 @@ PPE_Guard/
 │   └── main.py
 ├── weights/               # Pesos de los modelos YOLO (.pt) — no se suben a git
 ├── static/evidence/       # Imágenes de evidencia generadas en runtime — no se suben a git
-├── scripts/               # Scripts de prueba y de seed, se corren con `python -m scripts.<nombre>`
+├── scripts/               # Script de datos iniciales: `python -m scripts.seed_inicializar`
 ├── compose.yaml           # Solo Mongo + Mongo Express
 ├── requirements.txt
 └── .env                   # No se sube a git
@@ -216,7 +201,7 @@ Un JWT tiene tres partes separadas por puntos (`encabezado.payload.firma`). Es f
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"codigo": "DOC001", "password": "cambiar123"}' \
+  -d '{"codigo": "ADMIN001", "password": "cambiar123"}' \
   | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
 ```
 
