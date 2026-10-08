@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.post("/materias", response_model=MateriaInDB, dependencies=[Depends(require_role("coordinador"))])
-async def crear_materia(data: MateriaCreate):
+async def crear_materia(data: MateriaCreate, user: dict = Depends(get_current_user)):
     if not ObjectId.is_valid(data.docente_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="docente_id inválido")
@@ -20,6 +20,12 @@ async def crear_materia(data: MateriaCreate):
     if docente is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="El docente indicado no existe")
+
+    # La materia queda a cargo del coordinador del docente: un coordinador solo
+    # puede crearla para sus propios docentes. El admin, para cualquiera.
+    if user["rol"] == "coordinador" and docente["coordinador_id"] != user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="No puedes crear una materia para un docente fuera de tu cargo")
 
     doc = data.model_dump()
     doc["coordinador_id"] = docente["coordinador_id"]
